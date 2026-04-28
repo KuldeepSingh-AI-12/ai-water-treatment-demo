@@ -24,11 +24,7 @@ st.info(
 
 st.sidebar.header("Input water data")
 
-flowrate = st.sidebar.number_input(
-    "Flowrate (m³/h)",
-    min_value=0.1,
-    value=5.0
-)
+flowrate = st.sidebar.number_input("Flowrate (m³/h)", min_value=0.1, value=5.0)
 
 cr_in = st.sidebar.number_input(
     "Inlet Cr(VI) concentration (mg/L)",
@@ -42,12 +38,7 @@ cr_out = st.sidebar.number_input(
     value=0.05
 )
 
-ph = st.sidebar.number_input(
-    "pH",
-    min_value=0.0,
-    max_value=14.0,
-    value=7.0
-)
+ph = st.sidebar.number_input("pH", min_value=0.0, max_value=14.0, value=7.0)
 
 sulfate = st.sidebar.number_input(
     "Sulfate concentration (mg/L)",
@@ -55,11 +46,7 @@ sulfate = st.sidebar.number_input(
     value=100.0
 )
 
-cod = st.sidebar.number_input(
-    "COD (mg/L)",
-    min_value=0.0,
-    value=20.0
-)
+cod = st.sidebar.number_input("COD (mg/L)", min_value=0.0, value=20.0)
 
 bed_volume = st.sidebar.number_input(
     "Resin bed volume (m³)",
@@ -81,61 +68,77 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
     if cr_in <= 0:
         return (
             "No Cr(VI) treatment required",
-            "The inlet Cr(VI) concentration is zero.",
+            "No Cr(VI) is present in the inlet water.",
             0
         )
 
     removal_percent = max(0, (cr_in - cr_out) / cr_in * 100)
 
-    if cr_in > 50:
+    # Very high Cr(VI) or very acidic conditions
+    if cr_in > 50 or ph < 2:
         treatment = "Chemical reduction + Cr(III) hydroxide precipitation"
         reason = (
-            "The Cr(VI) concentration is high. For high-strength Cr(VI) streams, "
-            "bulk chemical reduction to Cr(III) followed by hydroxide precipitation "
-            "is usually more suitable than direct resin polishing."
+            "The Cr(VI) concentration is very high or the water is very acidic. "
+            "In this case, chemical reduction of Cr(VI) to Cr(III), followed by "
+            "hydroxide precipitation, is usually preferred for bulk removal."
         )
 
+    # Organic fouling risk
     elif cod > 200:
         treatment = "Organic pre-treatment + ion exchange polishing"
         reason = (
-            "COD is high. Organic compounds may increase fouling risk for ion exchange "
-            "resin, so pre-treatment should be considered before resin polishing."
+            "COD is high. Organic compounds may foul ion exchange resin, so an "
+            "organic removal or pre-treatment step should be considered before polishing."
         )
 
-    elif sulfate > 1000:
+    # Strong sulfate competition
+    elif sulfate > 2000:
         treatment = "Competing anion control + ion exchange polishing"
         reason = (
-            "Sulfate concentration is high. Sulfate can compete with chromate/dichromate "
-            "on anion exchange resin, reducing working capacity and affecting breakthrough."
+            "Sulfate concentration is high. Sulfate may compete with chromate/dichromate "
+            "on anion exchange resin and reduce effective resin capacity."
         )
 
-    elif ph < 2 or ph > 10:
-        treatment = "pH adjustment + chemical treatment or ion exchange polishing"
+    # Low pH but not extremely acidic
+    elif ph < 4:
+        treatment = "Chemical reduction followed by polishing"
         reason = (
-            "The pH is outside a comfortable preliminary range. pH adjustment may be "
-            "needed before selecting the final Cr(VI) removal process."
+            "The water is acidic. At lower pH, Cr(VI) speciation and resin performance "
+            "should be carefully evaluated. Chemical reduction followed by polishing may "
+            "be more robust."
         )
 
+    # High pH condition
+    elif ph > 9:
+        treatment = "Ion exchange polishing with pH and competing-ion checks"
+        reason = (
+            "At higher pH, chromate species are generally suitable for anion exchange, "
+            "but competing ions and regeneration strategy should be carefully checked."
+        )
+
+    # Normal polishing case
     elif removal_percent > 90 and cr_in <= 50:
         treatment = "Strong-base anion exchange resin for Cr(VI) polishing"
         reason = (
-            "The Cr(VI) concentration is relatively low and the removal target is strict. "
-            "Cr(VI) commonly exists as oxyanions such as chromate or dichromate, so "
-            "strong-base anion exchange resin is a suitable polishing option."
+            "The Cr(VI) concentration is relatively low and the required removal is high. "
+            "Cr(VI) commonly exists as oxyanions such as chromate/dichromate, so "
+            "strong-base anion exchange is a suitable polishing option."
         )
 
+    # Low concentration case
     elif cr_in < 1:
         treatment = "Adsorption or ion exchange polishing"
         reason = (
-            "The inlet Cr(VI) concentration is low. A polishing method such as adsorption "
-            "or ion exchange may be suitable."
+            "The inlet Cr(VI) concentration is low. A polishing technology such as "
+            "adsorption or ion exchange may be suitable."
         )
 
+    # Default case
     else:
-        treatment = "Chemical reduction + precipitation followed by polishing"
+        treatment = "Combined treatment approach"
         reason = (
-            "A combined treatment route may be suitable, especially if the outlet target "
-            "is strict or the water contains competing ions."
+            "The stream does not clearly fall into one single category. A combined "
+            "approach using chemical treatment and polishing may be appropriate."
         )
 
     return treatment, reason, removal_percent
@@ -158,9 +161,6 @@ cr_removed_kg_h = flowrate * max(0, cr_in - cr_out) / 1000
 bv_per_h = flowrate / bed_volume if bed_volume > 0 else 0
 ebct_min = 60 / bv_per_h if bv_per_h > 0 else 0
 
-# Simplified capacity estimate
-# Approximation: Cr(VI) as chromate, using Cr mass equivalent.
-# Cr atomic mass about 52 g/mol, chromate charge 2-, equivalent weight approx. 26 g/eq.
 resin_capacity_eq_L = 2.4
 theoretical_cr_capacity_g_L = resin_capacity_eq_L * 26
 working_capacity_factor = 0.25
@@ -198,17 +198,17 @@ st.subheader("Engineering interpretation")
 
 st.info(
     f"""
-    Based on the input conditions, the tool selected:
+Based on the input conditions, the tool selected:
 
-    **{treatment}**
+**{treatment}**
 
-    This decision is based on:
-    - Cr(VI) concentration
-    - Required removal efficiency
-    - pH
-    - COD / fouling risk
-    - Sulfate / competing anion risk
-    """
+This decision is influenced by:
+- Cr(VI) concentration
+- Required removal efficiency
+- pH
+- COD / organic fouling risk
+- Sulfate / competing anion risk
+"""
 )
 
 # -----------------------------
@@ -228,9 +228,13 @@ else:
     st.warning("Bed depth is below 800 mm. Consider increasing column height or resin volume.")
 
 if ph < 2:
-    st.warning("Very low pH: check Cr(VI) speciation, resin compatibility, and material selection.")
+    st.warning("Very low pH: chemical reduction is likely preferred before polishing.")
+elif ph < 4:
+    st.warning("Low pH: Cr(VI) speciation and resin performance should be checked.")
 elif ph > 10:
     st.warning("High pH: check competing anions, regeneration strategy, and resin performance.")
+elif ph > 9:
+    st.warning("Moderately high pH: ion exchange may work, but design checks are important.")
 else:
     st.success("pH is within a reasonable preliminary screening range.")
 
