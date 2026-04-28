@@ -1,29 +1,22 @@
 import streamlit as st
 import pandas as pd
 
-# Optional AI feature
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
-
-
 st.set_page_config(
     page_title="Cr(VI) Treatment Selector",
     layout="wide"
 )
 
 st.title("Cr(VI) Treatment Selection Demo")
+
 st.write(
-    "A simple rule-based and optional AI-assisted screening tool for hypothetical "
-    "hexavalent chromium removal from water."
+    "A simple rule-based screening tool for hypothetical hexavalent chromium "
+    "Cr(VI) removal from industrial water."
 )
 
 st.info(
-    "This is a screening-level educational demo only. Final design requires full water chemistry, "
-    "supplier confirmation, and lab/pilot testing."
+    "This is a preliminary educational demo only. Final design requires full water "
+    "chemistry, supplier confirmation, safety review, and lab or pilot testing."
 )
-
 
 # -----------------------------
 # Sidebar inputs
@@ -80,14 +73,8 @@ bed_depth = st.sidebar.number_input(
     value=800.0
 )
 
-use_ai = st.sidebar.checkbox(
-    "Use AI-based recommendation",
-    value=False
-)
-
-
 # -----------------------------
-# Rule-based logic
+# Rule-based treatment logic
 # -----------------------------
 
 def select_treatment(cr_in, cr_out, ph, sulfate, cod):
@@ -103,51 +90,52 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
     if cr_in > 50:
         treatment = "Chemical reduction + Cr(III) hydroxide precipitation"
         reason = (
-            "The Cr(VI) concentration is high. Bulk chemical reduction of Cr(VI) to Cr(III), "
-            "followed by hydroxide precipitation, is usually more suitable than direct resin polishing."
+            "The Cr(VI) concentration is high. For high-strength Cr(VI) streams, "
+            "bulk chemical reduction to Cr(III) followed by hydroxide precipitation "
+            "is usually more suitable than direct resin polishing."
         )
 
     elif cod > 200:
         treatment = "Organic pre-treatment + ion exchange polishing"
         reason = (
-            "COD is high, which can increase fouling risk for ion exchange resin. "
-            "A pre-treatment step should be considered before resin polishing."
+            "COD is high. Organic compounds may increase fouling risk for ion exchange "
+            "resin, so pre-treatment should be considered before resin polishing."
         )
 
     elif sulfate > 1000:
         treatment = "Competing anion control + ion exchange polishing"
         reason = (
-            "Sulfate is high and may compete with chromate/dichromate on anion exchange resin. "
-            "The resin system may still work, but capacity and breakthrough behavior must be tested."
+            "Sulfate concentration is high. Sulfate can compete with chromate/dichromate "
+            "on anion exchange resin, reducing working capacity and affecting breakthrough."
         )
 
     elif ph < 2 or ph > 10:
         treatment = "pH adjustment + chemical treatment or ion exchange polishing"
         reason = (
-            "The pH is outside a comfortable preliminary screening range. "
-            "pH adjustment may be required before selecting the final Cr(VI) removal method."
+            "The pH is outside a comfortable preliminary range. pH adjustment may be "
+            "needed before selecting the final Cr(VI) removal process."
         )
 
     elif removal_percent > 90 and cr_in <= 50:
         treatment = "Strong-base anion exchange resin for Cr(VI) polishing"
         reason = (
-            "The Cr(VI) concentration is relatively low and the removal target is high. "
-            "Cr(VI) commonly exists as oxyanions such as chromate/dichromate, making strong-base "
-            "anion exchange resin a suitable polishing option."
+            "The Cr(VI) concentration is relatively low and the removal target is strict. "
+            "Cr(VI) commonly exists as oxyanions such as chromate or dichromate, so "
+            "strong-base anion exchange resin is a suitable polishing option."
         )
 
     elif cr_in < 1:
         treatment = "Adsorption or ion exchange polishing"
         reason = (
-            "The inlet Cr(VI) concentration is low. A polishing technology such as adsorption "
+            "The inlet Cr(VI) concentration is low. A polishing method such as adsorption "
             "or ion exchange may be suitable."
         )
 
     else:
         treatment = "Chemical reduction + precipitation followed by polishing"
         reason = (
-            "A combined treatment route may be appropriate, especially if the outlet target is strict "
-            "or the water contains competing ions."
+            "A combined treatment route may be suitable, especially if the outlet target "
+            "is strict or the water contains competing ions."
         )
 
     return treatment, reason, removal_percent
@@ -161,7 +149,6 @@ treatment, reason, removal_percent = select_treatment(
     cod
 )
 
-
 # -----------------------------
 # Calculations
 # -----------------------------
@@ -171,7 +158,7 @@ cr_removed_kg_h = flowrate * max(0, cr_in - cr_out) / 1000
 bv_per_h = flowrate / bed_volume if bed_volume > 0 else 0
 ebct_min = 60 / bv_per_h if bv_per_h > 0 else 0
 
-# Simplified ion exchange capacity estimate
+# Simplified capacity estimate
 # Approximation: Cr(VI) as chromate, using Cr mass equivalent.
 # Cr atomic mass about 52 g/mol, chromate charge 2-, equivalent weight approx. 26 g/eq.
 resin_capacity_eq_L = 2.4
@@ -184,9 +171,8 @@ estimated_cr_capacity_kg = working_cr_capacity_g_L * resin_volume_L / 1000
 
 runtime_h = estimated_cr_capacity_kg / cr_removed_kg_h if cr_removed_kg_h > 0 else 0
 
-
 # -----------------------------
-# Output: key metrics
+# Key results
 # -----------------------------
 
 st.subheader("Key results")
@@ -198,20 +184,35 @@ col2.metric("Cr(VI) removed", f"{cr_removed_kg_h:.3f} kg/h")
 col3.metric("Hydraulic loading", f"{bv_per_h:.1f} BV/h")
 col4.metric("EBCT", f"{ebct_min:.1f} min")
 
-
 # -----------------------------
-# Output: treatment selection
+# Treatment recommendation
 # -----------------------------
 
-st.subheader("Rule-based treatment recommendation")
+st.subheader("Treatment recommendation")
 st.success(treatment)
 
 st.subheader("Why this treatment?")
 st.write(reason)
 
+st.subheader("Engineering interpretation")
+
+st.info(
+    f"""
+    Based on the input conditions, the tool selected:
+
+    **{treatment}**
+
+    This decision is based on:
+    - Cr(VI) concentration
+    - Required removal efficiency
+    - pH
+    - COD / fouling risk
+    - Sulfate / competing anion risk
+    """
+)
 
 # -----------------------------
-# Design checks
+# Ion exchange design checks
 # -----------------------------
 
 st.subheader("Ion exchange design checks")
@@ -233,7 +234,6 @@ elif ph > 10:
 else:
     st.success("pH is within a reasonable preliminary screening range.")
 
-
 # -----------------------------
 # Resin estimate
 # -----------------------------
@@ -253,93 +253,9 @@ col6.metric(
 )
 
 st.caption(
-    "The resin capacity calculation is simplified. Actual working capacity depends on water chemistry, "
+    "This capacity calculation is simplified. Actual working capacity depends on water chemistry, "
     "competing ions, resin type, regeneration strategy, and breakthrough criteria."
 )
-
-
-# -----------------------------
-# Optional AI recommendation
-# -----------------------------
-
-def get_ai_recommendation(
-    flowrate,
-    cr_in,
-    cr_out,
-    ph,
-    sulfate,
-    cod,
-    treatment,
-    reason
-):
-    if OpenAI is None:
-        return "OpenAI package is not installed. Run: pip install openai"
-
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-    prompt = f"""
-You are a water treatment process engineer.
-
-Evaluate this hypothetical Cr(VI) removal case.
-
-Input data:
-- Flowrate: {flowrate} m3/h
-- Inlet Cr(VI): {cr_in} mg/L
-- Target outlet Cr(VI): {cr_out} mg/L
-- pH: {ph}
-- Sulfate: {sulfate} mg/L
-- COD: {cod} mg/L
-
-Rule-based recommendation:
-{treatment}
-
-Rule-based reason:
-{reason}
-
-Compare these options:
-1. Strong-base anion exchange resin
-2. Chemical reduction of Cr(VI) to Cr(III) followed by precipitation
-3. Adsorption polishing
-4. Combined treatment
-
-Give a concise engineering recommendation with:
-- Recommended treatment route
-- Why this route was selected
-- Main risks
-- Additional data needed before final design
-
-Do not overclaim. State that this is only preliminary screening.
-"""
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt
-    )
-
-    return response.output_text
-
-
-if use_ai:
-    st.subheader("AI-based treatment recommendation")
-
-    try:
-        ai_result = get_ai_recommendation(
-            flowrate,
-            cr_in,
-            cr_out,
-            ph,
-            sulfate,
-            cod,
-            treatment,
-            reason
-        )
-        st.write(ai_result)
-
-    except Exception as e:
-        st.error("AI recommendation could not be generated.")
-        st.write("Most likely reason: missing OpenAI API key in Streamlit secrets.")
-        st.code(str(e))
-
 
 # -----------------------------
 # Input summary table
@@ -387,7 +303,6 @@ df = pd.DataFrame({
 })
 
 st.dataframe(df, use_container_width=True)
-
 
 # -----------------------------
 # Simple written summary
