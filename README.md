@@ -1,22 +1,63 @@
-# AI Water Treatment Concept Selector
+# Cr(VI) Treatment Selection Demo
 
-This is a simple Streamlit demo for early-stage industrial wastewater treatment concept screening.
+This is a simple Streamlit-based tool for preliminary screening of hexavalent chromium (Cr(VI)) removal from industrial water streams.
 
-## What it does
+## What the tool does
 
-The tool takes basic stream data such as:
+The application takes basic water quality and process inputs:
 
 - Flowrate
-- Sulfate concentration
-- Lithium concentration
-- COD
+- Inlet Cr(VI) concentration
+- Target outlet concentration
 - pH
+- Sulfate concentration
+- COD (organic load)
+- Resin bed volume and depth
 
-It then suggests a possible treatment route and provides simple CAPEX/OPEX complexity indicators.
+Based on these inputs, it:
 
-## Why I built this
+- Suggests a treatment route
+- Explains the reasoning behind the selection
+- Performs basic hydraulic checks (BV/h, EBCT)
+- Provides a simplified ion exchange capacity estimate
+- Highlights potential risks (fouling, competing ions, pH limits)
 
-I built this project to explore how AI and data-driven tools can support faster concept development in industrial water treatment, battery materials, hydrometallurgy, and circular economy applications.
+## Treatment options considered
+
+The tool uses rule-based logic to recommend among:
+
+- Chemical reduction + Cr(III) precipitation
+- Ion exchange (strong-base anion resin)
+- Adsorption / polishing
+- Combined treatment approaches
+
+## Engineering logic
+
+The decision is based on:
+
+- Cr(VI) concentration level
+- Required removal efficiency
+- Organic load (COD → fouling risk)
+- Competing ions (e.g., sulfate)
+- pH conditions
+
+This mimics an early-stage process selection approach used in concept development.
+
+## Important note
+
+This is a **screening-level tool only**.
+
+Final process design requires:
+- Full water chemistry analysis
+- Pilot or laboratory testing
+- Resin supplier validation
+- Safety and environmental assessment
+
+## Live demo
+
+You can access the app here:
+
+👉 https://ai-water-treatment-demo-fmx6c4qvrcamqu35kxdxoh.streamlit.app/
 
 ## Technologies used
 
@@ -24,16 +65,8 @@ I built this project to explore how AI and data-driven tools can support faster 
 - Streamlit
 - Pandas
 
-## Example applications
+## Why this project
 
-- Sulfate-rich wastewater
-- Lithium-containing process streams
-- Battery material industry wastewater
-- BPED and crystallization concept screening
+This project demonstrates how rule-based logic can support early-stage decision-making in industrial water treatment and process engineering.
 
-## Next improvements
-
-- Add AI explanation using OpenAI API
-- Add process flow diagram
-- Add more accurate CAPEX/OPEX estimation
-- Add exportable PDF summary
+It is intended as a simple example of digital tools applied to real engineering problems.
