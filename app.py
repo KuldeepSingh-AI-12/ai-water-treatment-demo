@@ -74,7 +74,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
 
     removal_percent = max(0, (cr_in - cr_out) / cr_in * 100)
 
-    # Very high Cr(VI) or very acidic conditions
     if cr_in > 50 or ph < 2:
         treatment = "Chemical reduction + Cr(III) hydroxide precipitation"
         reason = (
@@ -83,7 +82,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "hydroxide precipitation, is usually preferred for bulk removal."
         )
 
-    # Organic fouling risk
     elif cod > 200:
         treatment = "Organic pre-treatment + ion exchange polishing"
         reason = (
@@ -91,7 +89,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "organic removal or pre-treatment step should be considered before polishing."
         )
 
-    # Strong sulfate competition
     elif sulfate > 2000:
         treatment = "Competing anion control + ion exchange polishing"
         reason = (
@@ -99,7 +96,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "on anion exchange resin and reduce effective resin capacity."
         )
 
-    # Low pH but not extremely acidic
     elif ph < 4:
         treatment = "Chemical reduction followed by polishing"
         reason = (
@@ -108,7 +104,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "be more robust."
         )
 
-    # High pH condition
     elif ph > 9:
         treatment = "Ion exchange polishing with pH and competing-ion checks"
         reason = (
@@ -116,7 +111,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "but competing ions and regeneration strategy should be carefully checked."
         )
 
-    # Normal polishing case
     elif removal_percent > 90 and cr_in <= 50:
         treatment = "Strong-base anion exchange resin for Cr(VI) polishing"
         reason = (
@@ -125,7 +119,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "strong-base anion exchange is a suitable polishing option."
         )
 
-    # Low concentration case
     elif cr_in < 1:
         treatment = "Adsorption or ion exchange polishing"
         reason = (
@@ -133,7 +126,6 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
             "adsorption or ion exchange may be suitable."
         )
 
-    # Default case
     else:
         treatment = "Combined treatment approach"
         reason = (
@@ -144,6 +136,59 @@ def select_treatment(cr_in, cr_out, ph, sulfate, cod):
     return treatment, reason, removal_percent
 
 
+def alternative_treatment(treatment):
+    treatment_lower = treatment.lower()
+
+    if "chemical reduction" in treatment_lower:
+        return "Alternative: Ion exchange polishing after chemical reduction and precipitation."
+
+    elif "ion exchange" in treatment_lower:
+        return "Alternative: Chemical reduction + precipitation for bulk Cr(VI) removal."
+
+    elif "adsorption" in treatment_lower:
+        return "Alternative: Strong-base anion exchange resin for more selective polishing."
+
+    elif "no cr" in treatment_lower:
+        return "Alternative: No treatment required unless other contaminants are present."
+
+    else:
+        return "Alternative: Combined treatment using chemical reduction followed by polishing."
+
+
+def decision_drivers(cr_in, cr_out, ph, sulfate, cod):
+    drivers = []
+
+    if cr_in > 50:
+        drivers.append("High Cr(VI) concentration")
+    elif cr_in < 1 and cr_in > 0:
+        drivers.append("Low Cr(VI) concentration / polishing case")
+
+    if cr_in > 0:
+        removal_percent = max(0, (cr_in - cr_out) / cr_in * 100)
+        if removal_percent > 90:
+            drivers.append("High removal requirement")
+
+    if cod > 200:
+        drivers.append("High COD / organic fouling risk")
+
+    if sulfate > 2000:
+        drivers.append("High sulfate / competing anion risk")
+
+    if ph < 2:
+        drivers.append("Very acidic pH")
+    elif ph < 4:
+        drivers.append("Low pH condition")
+    elif ph > 10:
+        drivers.append("Very high pH")
+    elif ph > 9:
+        drivers.append("Moderately high pH")
+
+    if not drivers:
+        drivers.append("No dominant limiting factor identified")
+
+    return drivers
+
+
 treatment, reason, removal_percent = select_treatment(
     cr_in,
     cr_out,
@@ -151,6 +196,9 @@ treatment, reason, removal_percent = select_treatment(
     sulfate,
     cod
 )
+
+alternative = alternative_treatment(treatment)
+drivers = decision_drivers(cr_in, cr_out, ph, sulfate, cod)
 
 # -----------------------------
 # Calculations
@@ -194,6 +242,14 @@ st.success(treatment)
 st.subheader("Why this treatment?")
 st.write(reason)
 
+st.subheader("Alternative treatment option")
+st.info(alternative)
+
+st.subheader("Key decision drivers")
+
+for driver in drivers:
+    st.write(f"- {driver}")
+
 st.subheader("Engineering interpretation")
 
 st.info(
@@ -208,6 +264,10 @@ This decision is influenced by:
 - pH
 - COD / organic fouling risk
 - Sulfate / competing anion risk
+
+The tool also suggests:
+
+**{alternative}**
 """
 )
 
@@ -326,6 +386,12 @@ The rule-based treatment recommendation is:
 Reason:
 {reason}
 
+Alternative option:
+{alternative}
+
+Key decision drivers:
+{chr(10).join(["- " + driver for driver in drivers])}
+
 For ion exchange screening, the hydraulic loading is {bv_per_h:.1f} BV/h and the EBCT is {ebct_min:.1f} minutes.
 
 Using a simplified working capacity assumption of {working_cr_capacity_g_L:.1f} g Cr(VI)/L resin, the estimated operating time before regeneration is approximately {runtime_h:.0f} hours.
@@ -333,4 +399,4 @@ Using a simplified working capacity assumption of {working_cr_capacity_g_L:.1f} 
 This is only a screening-level estimate. Final design requires full water chemistry, competing ion analysis, supplier confirmation, safety review, and breakthrough testing.
 """
 
-st.text_area("Result summary", summary, height=320)
+st.text_area("Result summary", summary, height=360)
