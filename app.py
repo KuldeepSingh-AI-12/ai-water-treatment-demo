@@ -70,10 +70,31 @@ st.markdown("""
     color: #1a1a1a !important;
 }
 
-/* Stepper buttons keep light colour */
-[data-testid="stSidebar"] .stNumberInput button {
+/* Stepper +/- buttons — solid white bg, dark icon, hover orange */
+[data-testid="stSidebar"] .stNumberInput button,
+[data-testid="stSidebar"] [data-testid="stNumberInputStepDown"],
+[data-testid="stSidebar"] [data-testid="stNumberInputStepUp"],
+[data-testid="stSidebar"] .stNumberInput [data-testid="baseButton-minimal"] {
+    background: #ffffff !important;
     color: #1E5053 !important;
-    background: rgba(255,255,255,0.85) !important;
+    border: 1px solid #b0c4c4 !important;
+    border-radius: 4px !important;
+    opacity: 1 !important;
+    min-width: 28px !important;
+    font-weight: 700 !important;
+}
+[data-testid="stSidebar"] .stNumberInput button:hover,
+[data-testid="stSidebar"] [data-testid="stNumberInputStepDown"]:hover,
+[data-testid="stSidebar"] [data-testid="stNumberInputStepUp"]:hover {
+    background: #FF5F15 !important;
+    color: #ffffff !important;
+    border-color: #FF5F15 !important;
+}
+[data-testid="stSidebar"] .stNumberInput button svg,
+[data-testid="stSidebar"] .stNumberInput button p {
+    color: #1E5053 !important;
+    fill: #1E5053 !important;
+    stroke: #1E5053 !important;
 }
 
 h1, h2, h3 { font-family: 'Plus Jakarta Sans', sans-serif !important; color: var(--teal-dark) !important; }
