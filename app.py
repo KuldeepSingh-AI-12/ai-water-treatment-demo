@@ -259,8 +259,8 @@ with st.sidebar:
         help="Purchased equipment cost as starting point for CAPEX estimation")
     energy_price_eur_kwh = st.number_input("Energy price (€/kWh)", min_value=0.0, value=0.12)
     chemical_unit_cost   = st.number_input("Chemical cost (€/kg avg)", min_value=0.0, value=0.50)
-    cost_method          = st.selectbox("CAPEX method", ["Lang Factor", "Hand-Chilton"],
-        help="Lang: simple factor method ±50–100%. Hand-Chilton: equipment-type factors ±30–50%.")
+    cost_method          = st.selectbox("CAPEX method", ["Lang Method", "Chilton Method"],
+        help="Lang (1948): single factor f=4.74, Class 5 ±50–100%. Chilton (1960): individual sub-factors for piping, instruments, buildings, E&C — Class 4 ±30–50%.")
 
     st.markdown("---")
     st.markdown('<span style="font-size:0.75rem;color:rgba(255,255,255,0.45);">Adven Water Treatment Concept Tool · Internal Demo</span>', unsafe_allow_html=True)
@@ -909,55 +909,104 @@ def iex_suitability(tfp, ss, ht, hmt):
 
 
 # ─────────────────────────────────────────────
-# CAPEX / OPEX — LANG + HAND-CHILTON METHODS
+# CAPEX / OPEX — LANG + CHILTON METHODS
 # ─────────────────────────────────────────────
 def capex_opex_estimate(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh, method="Lang"):
     """
-    Two methods:
-    1. Lang Factor (Peters, Timmerhaus & West, Plant Design and Economics, 5th Ed.)
-       - Simple: TIC = f_lang × C_equipment
-       - f_lang = 4.7 for fluid process plants (pumps, tanks, reactors)
-       - Accuracy: Class 5, ±50–100%
+    Two factorial cost estimation methods:
 
-    2. Hand-Chilton Method (Hand 1958 / Chilton 1960, refined by Ulrich & Vasudevan 2004)
-       - More detailed: applies individual installation factors per equipment type
-       - Typical factors for water treatment: tanks f=3.1, pumps f=3.5, heat exchangers f=3.5,
-         packed columns f=4.0, vessels/reactors f=4.2, instrumentation f=1.5
-       - Accuracy: Class 4, ±30–50%
-       - Reference: Ulrich G.D. & Vasudevan P.T., Chemical Engineering Process Design and Economics, 2004
+    1. Lang Factor Method (Lang, 1948 — Peters, Timmerhaus & West, 5th Ed.)
+       Simple: TIC = f_lang × C_equipment (purchased)
+       f_lang = 4.7 for fluid-process plants
+       Accuracy: Class 5, ±50–100%
+
+    2. Chilton Method (Chilton, 1950s — Couper, Process Engineering Economics, 2003)
+       Extension of Lang — decomposes TIC into individual cost sub-factors applied
+       to the installed equipment cost (not purchased), making it more accurate.
+       Cost components (as fractions of installed equipment cost C_e_installed):
+         P1  Inside battery-limit piping       0.45
+         P2  Outside battery-limit piping      0.15
+         B   Buildings & structures            0.18
+         F   Auxiliary facilities & utilities  0.20
+         I   Instrumentation & controls        0.12
+       Physical cost: C_phys = C_e_installed × (1 + P1 + P2 + B + F + I)
+       Indirect costs (as fraction of C_phys):
+         E&C Engineering & construction        0.33
+         Contingency                           0.10
+         Size factor (water treatment, <10 M€) 0.05
+       TIC = C_phys × (1 + E&C + Contingency + Size factor)
+       Installed equipment ≈ purchased × 1.43 (erection, foundations, minor civil)
+       Accuracy: Class 4, ±30–50%
+       Reference: Couper J.R., Process Engineering Economics, Marcel Dekker, 2003;
+                  Sinnott R. & Towler G., Chemical Engineering Design, 5th Ed., 2009
 
     Both use 8,000 h/yr operating basis (continuous 24/7).
     """
     op_hours = 8000
 
     # ── Lang Method ──
-    lang_f   = 4.7
-    capex_lang = equip_keur * lang_f
+    lang_f      = 4.7
+    capex_lang  = equip_keur * lang_f
 
-    # ── Hand-Chilton Method ──
-    # Decompose equipment cost into typical water treatment equipment mix:
-    # 40% tanks/vessels, 20% pumps, 15% instrumentation/controls,
-    # 15% separation equipment (settlers, filters), 10% miscellaneous
-    hc_factors = {
-        "Tanks & reactors (40%)":        (0.40, 4.2),
-        "Pumps & piping (20%)":          (0.20, 3.5),
-        "Instrumentation (15%)":         (0.15, 2.5),
-        "Separation / filtration (15%)": (0.15, 3.8),
-        "Misc. (10%)":                   (0.10, 3.5),
+    # ── Chilton Method ──
+    # Step 1: Installed equipment cost (purchased × erection/foundation factor 1.43)
+    erection_f         = 1.43
+    c_installed        = equip_keur * erection_f
+
+    # Step 2: Physical (direct) cost sub-factors (fraction of c_installed)
+    chilton_direct = {
+        "P1  Inside piping (incl. insulation)":    0.45,
+        "P2  Outside piping (off-sites)":          0.15,
+        "B   Buildings & civil structures":        0.18,
+        "F   Auxiliary facilities & utilities":    0.20,
+        "I   Instrumentation & controls":          0.12,
     }
-    hc_breakdown = {}
-    capex_hc = 0.0
-    for label, (frac, factor) in hc_factors.items():
-        item_equip = equip_keur * frac
-        item_tIC   = item_equip * factor
-        hc_breakdown[label] = {"equip_keur": round(item_equip,1), "factor": factor,
-                                "installed_keur": round(item_tIC,1)}
-        capex_hc += item_tIC
+    direct_additions = sum(chilton_direct.values())  # 1.10
+    c_physical = c_installed * (1 + direct_additions)
 
-    # Select CAPEX based on method
-    capex_keur = capex_lang if method == "Lang" else capex_hc
+    # Step 3: Indirect cost factors (fraction of c_physical)
+    chilton_indirect = {
+        "E&C  Engineering & construction mgmt":   0.33,
+        "CON  Contingency (process uncertainty)": 0.10,
+        "SF   Size factor (small plant <10 M€)":  0.05,
+    }
+    indirect_additions = sum(chilton_indirect.values())  # 0.48
+    capex_chilton = c_physical * (1 + indirect_additions)
 
-    # ── OPEX (shared logic) ──
+    # Build breakdown table for display
+    chilton_breakdown = {}
+    for label, frac in chilton_direct.items():
+        chilton_breakdown[label] = {
+            "basis": "× installed equip. cost",
+            "factor": frac,
+            "cost_keur": round(c_installed * frac, 1)
+        }
+    chilton_breakdown["Installed equipment (base)"] = {
+        "basis": "purchased × 1.43",
+        "factor": erection_f,
+        "cost_keur": round(c_installed, 1)
+    }
+    chilton_breakdown["Physical cost subtotal"] = {
+        "basis": "installed × (1 + Σ direct factors)",
+        "factor": round(1 + direct_additions, 2),
+        "cost_keur": round(c_physical, 1)
+    }
+    for label, frac in chilton_indirect.items():
+        chilton_breakdown[label] = {
+            "basis": "× physical cost",
+            "factor": frac,
+            "cost_keur": round(c_physical * frac, 1)
+        }
+    chilton_breakdown["TOTAL (Chilton TIC)"] = {
+        "basis": "physical × (1 + Σ indirect)",
+        "factor": round((1 + direct_additions) * erection_f * (1 + indirect_additions), 2),
+        "cost_keur": round(capex_chilton, 0)
+    }
+
+    # Select CAPEX
+    capex_keur = capex_lang if method == "Lang" else capex_chilton
+
+    # ── OPEX (shared) ──
     base_dose     = 2.0 if pbase == "Lime / Ca(OH)₂" else (0.55 if pbase == "Na₂CO₃" else 1.2)
     chem_kg_yr    = base_dose * flow_m3h * op_hours
     chem_cost     = chem_kg_yr * chem_unit / 1000
@@ -968,20 +1017,22 @@ def capex_opex_estimate(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh, 
     opex_eur_m3   = (opex_keur_yr * 1000) / (flow_m3h * op_hours) if flow_m3h > 0 else 0
 
     return {
-        "capex_keur":           round(capex_keur, 0),
-        "capex_lang_keur":      round(capex_lang, 0),
-        "capex_hc_keur":        round(capex_hc, 0),
-        "hc_breakdown":         hc_breakdown,
-        "lang_factor":          lang_f,
-        "opex_keur_yr":         round(opex_keur_yr, 1),
-        "opex_eur_m3":          round(opex_eur_m3, 3),
-        "chem_cost_keur_yr":    round(chem_cost, 1),
-        "energy_cost_keur_yr":  round(energy_cost, 1),
-        "labour_maint_keur_yr": round(labour_maint, 1),
-        "method":               method,
+        "capex_keur":              round(capex_keur, 0),
+        "capex_lang_keur":         round(capex_lang, 0),
+        "capex_chilton_keur":      round(capex_chilton, 0),
+        "chilton_breakdown":       chilton_breakdown,
+        "chilton_c_installed":     round(c_installed, 1),
+        "chilton_c_physical":      round(c_physical, 1),
+        "lang_factor":             lang_f,
+        "opex_keur_yr":            round(opex_keur_yr, 1),
+        "opex_eur_m3":             round(opex_eur_m3, 3),
+        "chem_cost_keur_yr":       round(chem_cost, 1),
+        "energy_cost_keur_yr":     round(energy_cost, 1),
+        "labour_maint_keur_yr":    round(labour_maint, 1),
+        "method":                  method,
     }
 
-# Keep backward-compat alias
+# Backward-compat alias
 def lang_capex_opex(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh):
     return capex_opex_estimate(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh, "Lang")
 
@@ -1129,7 +1180,7 @@ steps        = process_train(main_goal, metals, initial_ph, target_final_ph, pre
 drivers      = decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph, heavy_metals_total, hardness_total)
 ph_strategy  = ph_adjustment_strategy(initial_ph, target_final_ph, preferred_base, preferred_acid)
 iex_score, iex_status, iex_comments = iex_suitability(target_final_ph, suspended_solids, hardness_total, heavy_metals_total)
-lang_est     = capex_opex_estimate(equipment_cost_keur, flowrate, preferred_base, chemical_unit_cost, energy_price_eur_kwh, "Lang" if cost_method=="Lang Factor" else "Hand-Chilton")
+lang_est     = capex_opex_estimate(equipment_cost_keur, flowrate, preferred_base, chemical_unit_cost, energy_price_eur_kwh, "Lang" if cost_method=="Lang Method" else "Chilton")
 need_low_precip  = (metals["Fe"]+metals["Al"]+metals["Cu"]) > THRESH["fe_al_cu_precip"]
 need_high_precip = (metals["Ni"]+metals["Co"]+metals["Mn"]) > THRESH["ni_co_mn_precip"]
 chem_est     = chemical_consumption(flowrate, initial_ph, target_final_ph, preferred_base, preferred_acid,
@@ -1185,10 +1236,16 @@ st.markdown(f"""
 st.markdown("""
 <div class="custom-disclaimer">
 ⚠️ <strong>Disclaimer:</strong> Hypothetical educational tool only — not based on real project, company data, or confidential information.
-Do not use for design decisions. This tool provides a high-level screening estimate (AACE Class 5, ±50–100% accuracy). It is intended solely for preliminary evaluation and concept development. It does not include rigorous thermodynamics, kinetics, complexation,
-ionic strength effects, jar testing data, resin breakthrough curves,
-or real plant data. Do NOT use these results for investment decisions, detailed design,
-or financial commitments. For expert consultation: <strong>Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com</strong>
+Do not use for design decisions.
+<br><br>
+This tool provides a high-level screening estimate (AACE Class 5, ±50–100% accuracy). It is intended solely for
+preliminary evaluation and concept development. It does not include rigorous thermodynamics, kinetics, complexation,
+ionic strength effects, jar testing data, resin breakthrough curves, or real plant data.
+<strong>Do NOT use these results for investment decisions, detailed design, or financial commitments.</strong>
+<br><br>
+For expert consultation:
+<strong>Dr. Kuldeep Singh</strong> | Concept Developer, Water Concept Team | Adven —
+<a href="mailto:kuldeep.singh@adven.com" style="color:#0F6E69;">kuldeep.singh@adven.com</a>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1438,32 +1495,36 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-header">CAPEX Estimation</div>', unsafe_allow_html=True)
     method_name = lang_est["method"]
-    is_hc = method_name == "Hand-Chilton"
+    is_hc = method_name == "Chilton"
     acc   = "±30–50%" if is_hc else "±50–100%"
     cls   = "Class 4" if is_hc else "Class 5"
 
     if is_hc:
+        chilton_eff = lang_est["chilton_breakdown"]["TOTAL (Chilton TIC)"]["factor"]
         st.markdown(f"""
         <div style="font-size:0.85rem;color:#555;margin-bottom:18px;line-height:1.6;">
-        <b>Hand-Chilton Method</b> (Ulrich & Vasudevan, 2004) applies individual installation factors per equipment category.
-        More accurate than the simple Lang factor because it accounts for the different cost build-up ratios of different equipment types.
+        <b>Chilton Method</b> (Chilton 1960, compiled in <em>Cost Engineering in the Process Industries</em>, McGraw-Hill).
+        An extension of Lang — decomposes TIC into individual sub-factors applied step by step:
+        (1) erection factor on purchased equipment → installed cost;
+        (2) direct cost sub-factors (piping P1/P2, buildings, auxiliary facilities, instruments) as fractions of installed cost → physical cost;
+        (3) indirect cost factors (engineering &amp; construction, contingency, size adjustment) on physical cost → TIC.
+        Effective overall factor for this plant: <b>{chilton_eff}×</b> purchased equipment cost.
         {cls} estimate, accuracy {acc}.
-        <br><em>TIC = Σ (equipment fraction × Hand-Chilton factor × C_equip)</em>
+        <br>Reference: Sinnott &amp; Towler, <em>Chemical Engineering Design</em>, 6th Ed., Table 6.1;
+        Chilton C.H. (Ed.), <em>Cost Engineering in the Process Industries</em>, McGraw-Hill, 1960.
         </div>""", unsafe_allow_html=True)
-        # Show breakdown
-        hc_rows = [{"Equipment Category": k, "Equip. cost (k€)": v["equip_keur"],
-                     "H-C Factor": v["factor"], "Installed cost (k€)": v["installed_keur"]}
-                   for k, v in lang_est["hc_breakdown"].items()]
-        hc_rows.append({"Equipment Category": "TOTAL", "Equip. cost (k€)": equipment_cost_keur,
-                         "H-C Factor": "—", "Installed cost (k€)": lang_est["capex_hc_keur"]})
+        hc_rows = [{"Cost Component": k, "Basis": v["basis"], "Factor": v["factor"], "Cost (k€)": v["cost_keur"]}
+                   for k, v in lang_est["chilton_breakdown"].items()]
         st.dataframe(pd.DataFrame(hc_rows), use_container_width=True, hide_index=True)
     else:
         st.markdown(f"""
         <div style="font-size:0.85rem;color:#555;margin-bottom:18px;line-height:1.6;">
-        <b>Lang Factor Method</b> (Peters, Timmerhaus & West, 5th Ed.) multiplies purchased equipment cost
-        by a single factor covering all installation costs. Lang factor = <b>{lang_est["lang_factor"]}</b> for fluid-process plants.
+        <b>Lang Method</b> (Lang 1948; Peters, Timmerhaus &amp; West, 5th Ed.)
+        multiplies total purchased equipment cost by a single global installation factor.
+        Lang factor f_L = <b>{lang_est["lang_factor"]}</b> for fluid-process plants (tanks, pumps, reactors).
         {cls} estimate, accuracy {acc}.
-        <br><em>CAPEX = {equipment_cost_keur:.0f} k€ × {lang_est["lang_factor"]} = <b>{lang_est["capex_keur"]:.0f} k€</b></em>
+        <br><em>TIC = {equipment_cost_keur:.0f} k€ × {lang_est["lang_factor"]} = <b>{lang_est["capex_keur"]:.0f} k€</b></em>
+        <br><span style="color:#888;font-size:0.82rem;">Switch to Chilton Method for a more detailed breakdown with individual sub-factors (±30–50%).</span>
         </div>""", unsafe_allow_html=True)
 
     col_c1, col_c2, col_c3 = st.columns(3)
@@ -1485,10 +1546,11 @@ with tab4:
           <div class="cost-note">CAPEX / OPEX ratio (illustrative)</div></div>""", unsafe_allow_html=True)
 
     if is_hc:
-        st.markdown(f"""<div style="font-size:0.82rem;color:#888;margin:8px 0 16px 0;">
-        Lang equivalent: {lang_est["capex_lang_keur"]:,.0f} k€ | 
-        Hand-Chilton: {lang_est["capex_hc_keur"]:,.0f} k€ | 
-        Difference: {abs(lang_est["capex_hc_keur"]-lang_est["capex_lang_keur"]):,.0f} k€</div>""", unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:0.82rem;color:#888;margin:8px 0 16px 0;">'
+                    f'Lang Method: {lang_est["capex_lang_keur"]:,.0f} k€ | '
+                    f'Chilton Method: {lang_est["capex_chilton_keur"]:,.0f} k€ | '
+                    f'Difference: {abs(lang_est["capex_chilton_keur"]-lang_est["capex_lang_keur"]):,.0f} k€</div>',
+                    unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">OPEX Breakdown</div>', unsafe_allow_html=True)
     opex_df = pd.DataFrame({
@@ -1500,10 +1562,14 @@ with tab4:
 
     st.markdown(f"""
     <div class="custom-disclaimer" style="margin-top:16px;">
-    📌 <strong>Methodology:</strong> {cls} ({acc}) — early-stage screening only.
-    Lang: Peters, Timmerhaus & West, <em>Plant Design and Economics for Chemical Engineers</em>, 5th Ed.
-    Hand-Chilton: Ulrich & Vasudevan, <em>Chemical Engineering Process Design and Economics</em>, 2nd Ed., 2004.
-    A proper Class 3 estimate requires vendor quotations, detailed P&IDs, and site-specific data.
+    📌 <strong>Methodology ({cls}, accuracy {acc}):</strong>
+    <b>Lang Method</b>: Lang H.J. (1948), Chem. Eng. 55:112; Peters, Timmerhaus &amp; West,
+    <em>Plant Design and Economics for Chemical Engineers</em>, 5th Ed.
+    <b>Chilton Method</b>: Chilton C.H. (Ed.), <em>Cost Engineering in the Process Industries</em>,
+    McGraw-Hill, 1960; Sinnott R. &amp; Towler G., <em>Chemical Engineering Design</em>, 6th Ed., Table 6.1.
+    Chilton is an extension of Lang — same purchased-equipment basis, but individual sub-factors for
+    piping, instruments, buildings, E&amp;C, and contingency give better accuracy.
+    A proper Class 3 estimate requires vendor quotations, detailed P&amp;IDs, and site-specific data.
     </div>""", unsafe_allow_html=True)
 
 
@@ -1657,16 +1723,10 @@ TOOL:   Early-stage concept screening demo v2
 ──────────────────────────────────────────────────────────────
 DISCLAIMER
 ──────────────────────────────────────────────────────────────
-This tool provides a high-level screening estimate (AACE Class 5, ±50–100% accuracy).
-It is intended solely for preliminary evaluation and concept development.
-
-It does not include rigorous thermodynamics, kinetics, complexation,
-ionic strength effects, jar testing data, resin breakthrough curves,
-or real plant data.
-
-Do NOT use these results for investment decisions, detailed design,
-or financial commitments.
-Contact: Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com
+Simplified educational model only. Does not include rigorous
+thermodynamics, kinetics, complexation, ionic strength effects,
+jar testing data, resin breakthrough curves, or real plant data.
+Contact: Dr. Kuldeep Singh — kuldeeep.singh@adven.com
 ════════════════════════════════════════════════════════════════
 """
     st.text_area("Full Screening Report", summary, height=620)
