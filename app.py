@@ -2,346 +2,442 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(
-    page_title="Heavy Metal Precipitation Demo",
+    page_title="Sodium Sulfate Polishing Demo",
     layout="wide"
 )
 
-st.title("Black Mass Refinery Heavy Metal Precipitation Demo")
-
-st.write(
-    "A simple rule-based screening tool for hypothetical heavy metal removal "
-    "from sodium sulfate-rich black mass refinery wastewater."
-)
+st.title("Battery Leachate / Sodium Sulfate Polishing Demo")
 
 st.warning(
-    "Disclaimer: This is a purely hypothetical educational example. "
-    "It is not based on any real industrial stream, project, or company data. "
-    "Final design requires full water chemistry, laboratory testing, safety review, "
-    "and process validation."
+    "Disclaimer: This is a hypothetical educational tool only. "
+    "It is not based on any real industrial stream, project, company data, or confidential information. "
+    "Do not use it for design decisions."
+)
+
+st.write(
+    "A rule-based screening demo for polishing sodium sulfate-rich water after heavy metal precipitation "
+    "in a hypothetical battery recycling / black mass refinery context."
 )
 
 # -----------------------------
 # Sidebar inputs
 # -----------------------------
 
-st.sidebar.header("Input stream data")
+st.sidebar.header("Stream data")
 
 flowrate = st.sidebar.number_input("Flowrate (m³/h)", min_value=0.1, value=10.0)
 
-initial_ph = st.sidebar.number_input("Initial pH", min_value=0.0, max_value=14.0, value=3.0)
+initial_ph = st.sidebar.number_input("Initial pH", min_value=0.0, max_value=14.0, value=4.0)
 
-target_ph = st.sidebar.number_input(
-    "Target precipitation pH",
+target_final_ph = st.sidebar.number_input(
+    "Target final pH before IEX",
     min_value=0.0,
     max_value=14.0,
-    value=10.0
+    value=7.0
 )
 
-alkali = st.sidebar.selectbox(
-    "Alkali for pH adjustment",
-    ["NaOH", "Lime / Ca(OH)₂"]
+main_goal = st.sidebar.selectbox(
+    "Main treatment objective",
+    [
+        "Clean sodium sulfate solution / IEX polishing",
+        "Wastewater polishing only",
+        "Ni/Co/Mn hydroxide precursor recovery",
+        "Ni/Co/Mn carbonate precursor recovery"
+    ]
 )
 
-st.sidebar.subheader("Dissolved metals (mg/L)")
+preferred_base = st.sidebar.selectbox(
+    "Preferred base for pH increase",
+    ["NaOH", "Lime / Ca(OH)₂", "Na₂CO₃"]
+)
 
-ni = st.sidebar.number_input("Nickel, Ni (mg/L)", min_value=0.0, value=100.0)
-co = st.sidebar.number_input("Cobalt, Co (mg/L)", min_value=0.0, value=50.0)
-mn = st.sidebar.number_input("Manganese, Mn (mg/L)", min_value=0.0, value=200.0)
-fe = st.sidebar.number_input("Iron, Fe (mg/L)", min_value=0.0, value=20.0)
-al = st.sidebar.number_input("Aluminium, Al (mg/L)", min_value=0.0, value=10.0)
-ca = st.sidebar.number_input("Calcium, Ca (mg/L)", min_value=0.0, value=300.0)
-mg = st.sidebar.number_input("Magnesium, Mg (mg/L)", min_value=0.0, value=100.0)
+preferred_acid = st.sidebar.selectbox(
+    "Preferred acid for pH decrease",
+    ["H₂SO₄", "HCl"]
+)
+
+st.sidebar.subheader("Dissolved species (mg/L)")
+
+li = st.sidebar.number_input("Lithium, Li (mg/L)", min_value=0.0, value=500.0)
+ni = st.sidebar.number_input("Nickel, Ni (mg/L)", min_value=0.0, value=2.0)
+co = st.sidebar.number_input("Cobalt, Co (mg/L)", min_value=0.0, value=1.0)
+mn = st.sidebar.number_input("Manganese, Mn (mg/L)", min_value=0.0, value=5.0)
+cu = st.sidebar.number_input("Copper, Cu (mg/L)", min_value=0.0, value=0.5)
+fe = st.sidebar.number_input("Iron, Fe (mg/L)", min_value=0.0, value=1.0)
+al = st.sidebar.number_input("Aluminium, Al (mg/L)", min_value=0.0, value=1.0)
+ca = st.sidebar.number_input("Calcium, Ca (mg/L)", min_value=0.0, value=50.0)
+mg = st.sidebar.number_input("Magnesium, Mg (mg/L)", min_value=0.0, value=20.0)
 
 sulfate = st.sidebar.number_input(
-    "Sodium sulfate / sulfate level (mg/L as SO₄)",
+    "Sulfate level (mg/L as SO₄)",
     min_value=0.0,
     value=50000.0
 )
 
+suspended_solids = st.sidebar.number_input(
+    "Suspended solids / precipitate carryover (mg/L)",
+    min_value=0.0,
+    value=20.0
+)
+
 # -----------------------------
-# Helper calculations
+# Data
 # -----------------------------
 
 metals = {
+    "Li": li,
     "Ni": ni,
     "Co": co,
     "Mn": mn,
+    "Cu": cu,
     "Fe": fe,
     "Al": al,
     "Ca": ca,
     "Mg": mg
 }
 
-def precipitation_status(target_ph):
-    status = {}
+heavy_metals_total = ni + co + mn + cu + fe + al
+hardness_total = ca + mg
+all_metals_total = sum(metals.values())
 
-    if target_ph >= 4:
-        status["Fe"] = "Likely precipitates as Fe(OH)₃ / Fe hydroxides"
+# -----------------------------
+# Rule functions
+# -----------------------------
+
+def metal_level_category(heavy_metals_total):
+    if heavy_metals_total < 5:
+        return "Low residual metals"
+    elif heavy_metals_total < 100:
+        return "Moderate metals"
     else:
-        status["Fe"] = "Mostly soluble"
-
-    if target_ph >= 5:
-        status["Al"] = "Likely precipitates as Al(OH)₃"
-    else:
-        status["Al"] = "Mostly soluble"
-
-    if target_ph >= 8.5:
-        status["Ni"] = "Likely starts precipitating as Ni(OH)₂"
-        status["Co"] = "Likely starts precipitating as Co(OH)₂"
-    else:
-        status["Ni"] = "May remain partly soluble"
-        status["Co"] = "May remain partly soluble"
-
-    if target_ph >= 9.5:
-        status["Mn"] = "Likely precipitates more strongly as Mn hydroxide/oxide"
-    else:
-        status["Mn"] = "May require higher pH or oxidation support"
-
-    if target_ph >= 10:
-        status["Mg"] = "May precipitate as Mg(OH)₂ and increase sludge"
-    else:
-        status["Mg"] = "Mostly remains in solution"
-
-    if target_ph >= 10.5:
-        status["Ca"] = "Scaling/sludge risk may increase"
-    else:
-        status["Ca"] = "Mostly remains in solution, but scaling risk depends on carbonate/sulfate chemistry"
-
-    return status
+        return "High metals"
 
 
-def estimate_removed_fraction(metal, target_ph):
-    if metal == "Fe":
-        return 0.95 if target_ph >= 4 else 0.2
-    if metal == "Al":
-        return 0.95 if target_ph >= 5 else 0.2
-    if metal in ["Ni", "Co"]:
-        if target_ph >= 10:
-            return 0.95
-        elif target_ph >= 8.5:
-            return 0.75
-        else:
-            return 0.2
-    if metal == "Mn":
-        if target_ph >= 10.5:
+def estimate_stage_removal(metal, stage):
+    if stage == "low_pH":
+        if metal in ["Fe", "Al", "Cu"]:
+            return 0.70
+        return 0.05
+
+    if stage == "high_pH":
+        if metal in ["Ni", "Co"]:
             return 0.85
-        elif target_ph >= 9.5:
-            return 0.6
-        else:
-            return 0.15
-    if metal == "Mg":
-        return 0.5 if target_ph >= 10 else 0.05
-    if metal == "Ca":
-        return 0.2 if target_ph >= 10.5 else 0.05
-    return 0
+        if metal == "Mn":
+            return 0.55
+        if metal in ["Fe", "Al", "Cu"]:
+            return 0.25
+        if metal == "Mg":
+            return 0.35
+        if metal == "Ca":
+            return 0.10
+        return 0.02
+
+    if stage == "iex":
+        if metal in ["Ni", "Co", "Cu", "Fe", "Al"]:
+            return 0.90
+        if metal == "Mn":
+            return 0.75
+        if metal in ["Ca", "Mg"]:
+            return 0.70
+        if metal == "Li":
+            return 0.02
+        return 0.0
+
+    return 0.0
 
 
-def select_treatment(initial_ph, target_ph, sulfate, metals, alkali):
-    total_transition_metals = metals["Ni"] + metals["Co"] + metals["Mn"]
-    total_impurities = metals["Fe"] + metals["Al"] + metals["Ca"] + metals["Mg"]
+def multistage_removal(concentration, metal):
+    remaining = concentration
 
-    if target_ph < 7:
-        treatment = "Partial neutralization / Fe-Al removal step"
-        reason = (
-            "The target pH is relatively low. This condition is more suitable for removing "
-            "Fe and Al hydroxides, while Ni, Co, and Mn may remain largely soluble."
+    removed_low = remaining * estimate_stage_removal(metal, "low_pH")
+    remaining -= removed_low
+
+    removed_high = remaining * estimate_stage_removal(metal, "high_pH")
+    remaining -= removed_high
+
+    removed_iex = remaining * estimate_stage_removal(metal, "iex")
+    remaining -= removed_iex
+
+    return removed_low, removed_high, removed_iex, remaining
+
+
+def ph_adjustment_strategy(initial_ph, target_final_ph, preferred_base, preferred_acid):
+    steps = []
+
+    if initial_ph < 5:
+        steps.append(
+            f"Initial pH is acidic. Use controlled {preferred_base} dosing for staged precipitation."
+        )
+    elif initial_ph > 10:
+        steps.append(
+            f"Initial pH is high. Use controlled {preferred_acid} dosing to reduce pH before IEX if needed."
+        )
+    else:
+        steps.append(
+            "Initial pH is moderate. Fine pH adjustment may be enough before polishing."
         )
 
-    elif 7 <= target_ph < 9:
-        treatment = "Two-stage precipitation recommended"
-        reason = (
-            "This pH range may remove Fe and Al effectively, but Ni, Co, and Mn may need "
-            "a second higher-pH precipitation step."
+    if target_final_ph < 6 or target_final_ph > 9:
+        steps.append(
+            "Target final pH is outside a conservative IEX polishing window; check resin supplier recommendations."
+        )
+    else:
+        steps.append(
+            "Target final pH is suitable for a typical polishing step, subject to resin supplier confirmation."
         )
 
-    elif 9 <= target_ph <= 10.5:
-        treatment = "Hydroxide precipitation of Ni/Co/Mn + solid-liquid separation"
+    return steps
+
+
+def select_treatment_goal(main_goal, level, sulfate, suspended_solids):
+    if main_goal == "Clean sodium sulfate solution / IEX polishing":
+        treatment = "Multistage precipitation + filtration + chelating IEX polishing"
         reason = (
-            "The selected pH is suitable for bulk hydroxide precipitation of transition metals "
-            "such as Ni, Co, and partly Mn."
+            "The goal is a clean sodium sulfate-rich solution. Bulk solids and precipitated metals should be removed "
+            "before final chelating ion exchange polishing."
+        )
+
+    elif main_goal == "Wastewater polishing only":
+        treatment = "pH precipitation + solid-liquid separation + optional IEX"
+        reason = (
+            "The goal is residual metal reduction. Precipitation handles bulk removal, while IEX can polish remaining metals."
+        )
+
+    elif main_goal == "Ni/Co/Mn hydroxide precursor recovery":
+        treatment = "Impurity removal + Ni/Co/Mn hydroxide co-precipitation"
+        reason = (
+            "The objective is recovery of Ni/Co/Mn as hydroxide precursor. Impurity control before co-precipitation is important."
         )
 
     else:
-        treatment = "High-pH precipitation with scaling/sludge risk"
+        treatment = "Impurity removal + Ni/Co/Mn carbonate co-precipitation"
         reason = (
-            "Very high pH may improve some metal removal, but it can increase Mg/Ca precipitation, "
-            "scaling, chemical consumption, and sludge production."
+            "The objective is recovery of Ni/Co/Mn as carbonate precursor. Carbonate precipitation and pH control are important."
         )
 
-    if sulfate > 50000:
-        reason += " The sulfate level is high, so the treated water may remain sodium sulfate-rich."
+    if level == "Low residual metals":
+        reason += " Since residual metals are low, IEX polishing becomes more relevant than aggressive bulk precipitation."
 
-    if alkali == "Lime / Ca(OH)₂":
-        reason += " Lime may reduce chemical cost but can increase calcium load and sludge volume."
-    else:
-        reason += " NaOH gives cleaner sodium-based chemistry but can be more expensive."
+    if sulfate > 30000:
+        reason += " The solution is sulfate-rich, so sodium sulfate management remains the main downstream consideration."
+
+    if suspended_solids > 10:
+        reason += " Suspended solids should be removed before IEX to reduce fouling/pressure drop."
 
     return treatment, reason
 
 
-status = precipitation_status(target_ph)
-treatment, reason = select_treatment(initial_ph, target_ph, sulfate, metals, alkali)
+def process_train(main_goal, initial_ph, target_final_ph, preferred_base, preferred_acid):
+    base_steps = [
+        "Feed equalization tank",
+        "Bag filtration / cartridge filtration to remove large suspended solids",
+        "Stage 1 pH adjustment for early precipitating metals such as Fe, Al and Cu",
+        "Stage 1 solid-liquid separation or sludge removal",
+        "Stage 2 pH adjustment for Ni, Co and Mn precipitation",
+        "Coagulation / flocculation, either in-situ or ex-situ, if fine particles remain",
+        "Clarification, lamella settling, filter press or other solid-liquid separation",
+        "Sand filter / multimedia filter / cartridge filter to protect the IEX resin",
+        "Final pH balancing before ion exchange polishing",
+        "Chelating ion exchange resin polishing",
+        "Clean sodium sulfate-rich solution"
+    ]
+
+    if main_goal == "Ni/Co/Mn hydroxide precursor recovery":
+        base_steps.insert(
+            5,
+            "Controlled NaOH addition for Ni/Co/Mn hydroxide precursor formation"
+        )
+
+    if main_goal == "Ni/Co/Mn carbonate precursor recovery":
+        base_steps.insert(
+            5,
+            "Controlled Na₂CO₃ addition for Ni/Co/Mn carbonate precursor formation"
+        )
+
+    if initial_ph > target_final_ph:
+        base_steps.append(f"Use {preferred_acid} carefully if pH needs to be reduced before IEX.")
+    elif initial_ph < target_final_ph:
+        base_steps.append(f"Use {preferred_base} carefully if pH needs to be increased for precipitation.")
+
+    return base_steps
+
+
+def decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph):
+    drivers = []
+
+    if ni + co + mn < 10 and main_goal == "Clean sodium sulfate solution / IEX polishing":
+        drivers.append("Residual transition metals are low, so polishing is more important than bulk precipitation")
+
+    if metals["Fe"] + metals["Al"] + metals["Cu"] > 2:
+        drivers.append("Fe/Al/Cu can precipitate earlier and may form fine solids")
+
+    if metals["Ni"] + metals["Co"] + metals["Mn"] > 20:
+        drivers.append("Ni/Co/Mn may require a higher-pH precipitation stage before polishing")
+
+    if hardness_total > 100:
+        drivers.append("Ca/Mg may load the chelating resin and reduce polishing capacity")
+
+    if sulfate > 30000:
+        drivers.append("Sodium sulfate-rich matrix should remain mostly in solution")
+
+    if suspended_solids > 10:
+        drivers.append("Suspended solids can foul IEX; filtration before resin is important")
+
+    if target_final_ph < 6 or target_final_ph > 9:
+        drivers.append("Final pH may need adjustment before IEX polishing")
+
+    if not drivers:
+        drivers.append("No dominant limiting factor identified")
+
+    return drivers
+
+
+def iex_suitability(target_final_ph, suspended_solids, hardness_total, heavy_metals_total):
+    score = 100
+    comments = []
+
+    if target_final_ph < 6 or target_final_ph > 9:
+        score -= 25
+        comments.append("pH should be adjusted before IEX polishing.")
+
+    if suspended_solids > 10:
+        score -= 25
+        comments.append("Solids carryover is too high; improve filtration before resin.")
+
+    if hardness_total > 300:
+        score -= 20
+        comments.append("High Ca/Mg may consume chelating resin capacity.")
+
+    if heavy_metals_total > 100:
+        score -= 20
+        comments.append("Metals are high; use precipitation first, not direct IEX.")
+
+    if score >= 80:
+        status = "Good candidate for IEX polishing"
+    elif score >= 50:
+        status = "Possible, but pre-treatment should be improved"
+    else:
+        status = "Not ideal for direct IEX; improve precipitation/filtration first"
+
+    if not comments:
+        comments.append("Conditions look reasonable for polishing-level IEX screening.")
+
+    return score, status, comments
+
 
 # -----------------------------
-# Mass estimates
+# Calculations
 # -----------------------------
+
+level = metal_level_category(heavy_metals_total)
+treatment, reason = select_treatment_goal(main_goal, level, sulfate, suspended_solids)
+steps = process_train(main_goal, initial_ph, target_final_ph, preferred_base, preferred_acid)
+drivers = decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph)
+ph_strategy = ph_adjustment_strategy(initial_ph, target_final_ph, preferred_base, preferred_acid)
+iex_score, iex_status, iex_comments = iex_suitability(
+    target_final_ph,
+    suspended_solids,
+    hardness_total,
+    heavy_metals_total
+)
 
 results = []
-
 total_removed_kg_h = 0
+total_remaining_metals = 0
 
 for metal, conc in metals.items():
-    removed_fraction = estimate_removed_fraction(metal, target_ph)
-    removed_mg_l = conc * removed_fraction
-    remaining_mg_l = conc - removed_mg_l
-    removed_kg_h = flowrate * removed_mg_l / 1000
+    removed_low, removed_high, removed_iex, remaining = multistage_removal(conc, metal)
+
+    total_removed = removed_low + removed_high + removed_iex
+    removed_kg_h = flowrate * total_removed / 1000
 
     total_removed_kg_h += removed_kg_h
+    total_remaining_metals += remaining
 
     results.append({
-        "Metal": metal,
-        "Inlet (mg/L)": conc,
-        "Estimated removal (%)": removed_fraction * 100,
-        "Remaining (mg/L)": remaining_mg_l,
-        "Removed (kg/h)": removed_kg_h,
-        "Comment": status.get(metal, "")
+        "Species": metal,
+        "Inlet (mg/L)": round(conc, 3),
+        "Removed in Stage 1 low-pH precip. (mg/L)": round(removed_low, 3),
+        "Removed in Stage 2 high-pH precip. (mg/L)": round(removed_high, 3),
+        "Removed by IEX polishing (mg/L)": round(removed_iex, 3),
+        "Final remaining (mg/L)": round(remaining, 4),
+        "Total removed (kg/h)": round(removed_kg_h, 4)
     })
 
 df_results = pd.DataFrame(results)
 
-# Simple neutralization index
-ph_increase = max(0, target_ph - initial_ph)
-alkali_index = flowrate * ph_increase
-
-if alkali == "NaOH":
-    chemical_comment = "NaOH selected: cleaner sodium chemistry, suitable for sodium sulfate-rich systems."
-else:
-    chemical_comment = "Lime selected: lower-cost alkali, but may increase Ca-related scaling and sludge."
+ph_change_index = abs(target_final_ph - initial_ph) * flowrate
 
 # -----------------------------
-# Key outputs
+# Dashboard
 # -----------------------------
 
 st.subheader("Key screening results")
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Target pH", f"{target_ph:.1f}")
-col2.metric("pH increase", f"{ph_increase:.1f}")
-col3.metric("Estimated metal sludge load", f"{total_removed_kg_h:.2f} kg/h")
-col4.metric("Alkali demand index", f"{alkali_index:.1f}")
+col1.metric("Metal level", level)
+col2.metric("IEX suitability score", f"{iex_score}/100")
+col3.metric("Removed load", f"{total_removed_kg_h:.2f} kg/h")
+col4.metric("pH adjustment index", f"{ph_change_index:.1f}")
 
-st.subheader("Recommended treatment route")
+st.subheader("Recommended treatment concept")
 st.success(treatment)
 
 st.subheader("Why this route?")
 st.write(reason)
 
+st.subheader("pH adjustment strategy")
+for item in ph_strategy:
+    st.write(f"- {item}")
+
 st.subheader("Suggested process train")
+for i, step in enumerate(steps, start=1):
+    st.write(f"{i}. {step}")
 
-if target_ph < 7:
-    process_train = [
-        "Feed equalization",
-        "Controlled alkali dosing",
-        "Fe/Al hydroxide precipitation",
-        "Clarification or filtration",
-        "Second-stage pH adjustment if Ni/Co/Mn removal is required",
-        "Polishing if needed"
-    ]
-elif target_ph <= 10.5:
-    process_train = [
-        "Feed equalization",
-        "pH adjustment with selected alkali",
-        "Hydroxide precipitation of heavy metals",
-        "Coagulation/flocculation if needed",
-        "Clarification or filtration",
-        "Chelating ion exchange polishing if strict limits are required",
-        "Sodium sulfate-rich treated water management"
-    ]
-else:
-    process_train = [
-        "Feed equalization",
-        "High-pH alkali dosing",
-        "Heavy metal + Mg/Ca precipitation",
-        "Sludge thickening and filtration",
-        "pH correction before discharge/reuse",
-        "Polishing step if required"
-    ]
-
-for step in process_train:
-    st.write(f"- {step}")
-
-# -----------------------------
-# Decision drivers
-# -----------------------------
+st.subheader("IEX polishing suitability")
+st.info(iex_status)
+for comment in iex_comments:
+    st.write(f"- {comment}")
 
 st.subheader("Key decision drivers")
-
-drivers = []
-
-if ni + co + mn > 100:
-    drivers.append("Significant Ni/Co/Mn load")
-if fe + al > 20:
-    drivers.append("Fe/Al can support hydroxide precipitation and co-precipitation")
-if ca + mg > 300:
-    drivers.append("High Ca/Mg may increase scaling or sludge burden")
-if sulfate > 30000:
-    drivers.append("High sulfate / sodium sulfate-rich matrix")
-if target_ph > 10:
-    drivers.append("High pH increases Mg/Ca precipitation risk")
-if initial_ph < 4:
-    drivers.append("Acidic feed requires neutralization")
-
-if not drivers:
-    drivers.append("No dominant limiting factor identified")
-
 for driver in drivers:
     st.write(f"- {driver}")
 
 # -----------------------------
-# Metal removal table
+# Removal table
 # -----------------------------
 
-st.subheader("Estimated metal removal")
+st.subheader("Estimated staged metal removal")
 
 st.dataframe(df_results, use_container_width=True)
 
 # -----------------------------
-# Risk comments
+# Warnings / risks
 # -----------------------------
 
 st.subheader("Risk comments")
 
+if suspended_solids > 10:
+    st.warning("Solids carryover may foul IEX resin. Add or improve bag filtration, sand filtration, or cartridge filtration.")
+
+if hardness_total > 300:
+    st.warning("High Ca/Mg can consume chelating resin capacity and may reduce run length.")
+
+if ni + co + mn > 100:
+    st.warning("Ni/Co/Mn are not just polishing-level contaminants; bulk precipitation should be prioritized.")
+
 if sulfate > 50000:
-    st.warning("Very high sulfate: sodium sulfate remains in solution and may require downstream management.")
+    st.warning("Very high sulfate: sodium sulfate remains the main dissolved salt and may need downstream concentration/crystallization depending on reuse target.")
 
-if target_ph > 10:
-    st.warning("High pH may increase Mg/Ca precipitation, scaling, sludge generation, and alkali consumption.")
+if target_final_ph < 6 or target_final_ph > 9:
+    st.warning("Final pH should be balanced before IEX. Check selected resin supplier guidance.")
 
-if mn > 100 and target_ph < 10:
-    st.warning("Manganese may not be fully removed at this pH. Higher pH or oxidation support may be required.")
+if preferred_base == "Lime / Ca(OH)₂":
+    st.warning("Lime may lower chemical cost but can add Ca load and increase sludge/scaling risk.")
 
-if ca + mg > 500:
-    st.warning("High hardness: consider scaling risk and sludge volume.")
-
-if ni + co > 100 and target_ph < 9:
-    st.warning("Ni and Co may need higher pH or polishing to reach strict targets.")
-
-st.info(chemical_comment)
-
-# -----------------------------
-# Polishing recommendation
-# -----------------------------
-
-st.subheader("Polishing recommendation")
-
-if ni + co + mn > 0:
-    st.info(
-        "If strict residual metal limits are required, consider a polishing step such as "
-        "chelating ion exchange after precipitation and filtration."
-    )
-else:
-    st.write("No transition metals entered; polishing may not be required.")
+if preferred_acid == "HCl":
+    st.warning("HCl may introduce chloride. For sodium sulfate product quality, H₂SO₄ may be preferred if compatible.")
 
 # -----------------------------
 # Input summary
@@ -353,36 +449,48 @@ df_input = pd.DataFrame({
     "Parameter": [
         "Flowrate",
         "Initial pH",
-        "Target precipitation pH",
-        "Alkali",
+        "Target final pH before IEX",
+        "Main goal",
+        "Preferred base",
+        "Preferred acid",
+        "Li",
         "Ni",
         "Co",
         "Mn",
+        "Cu",
         "Fe",
         "Al",
         "Ca",
         "Mg",
-        "Sulfate"
+        "Sulfate",
+        "Suspended solids"
     ],
     "Value": [
         flowrate,
         initial_ph,
-        target_ph,
-        alkali,
+        target_final_ph,
+        main_goal,
+        preferred_base,
+        preferred_acid,
+        li,
         ni,
         co,
         mn,
+        cu,
         fe,
         al,
         ca,
         mg,
-        sulfate
+        sulfate,
+        suspended_solids
     ],
     "Unit": [
         "m³/h",
         "-",
         "-",
         "-",
+        "-",
+        "-",
         "mg/L",
         "mg/L",
         "mg/L",
@@ -390,7 +498,10 @@ df_input = pd.DataFrame({
         "mg/L",
         "mg/L",
         "mg/L",
-        "mg/L as SO₄"
+        "mg/L",
+        "mg/L",
+        "mg/L as SO₄",
+        "mg/L"
     ]
 })
 
@@ -403,27 +514,34 @@ st.dataframe(df_input, use_container_width=True)
 st.subheader("Simple interpretation")
 
 summary = f"""
-This hypothetical black mass refinery wastewater contains dissolved Ni, Co, Mn, Fe, Al, Ca, Mg and sulfate.
+This hypothetical sodium sulfate-rich stream contains low to moderate residual metals after upstream battery recycling / black mass treatment.
 
-The selected treatment concept is:
+Main objective:
+{main_goal}
 
+Recommended concept:
 {treatment}
 
 Reason:
 {reason}
 
-The target precipitation pH is {target_ph:.1f}, starting from an initial pH of {initial_ph:.1f}.
-The selected alkali is {alkali}.
+Suggested route:
+{chr(10).join([str(i) + ". " + step for i, step in enumerate(steps, start=1)])}
 
-The estimated removed metal load is approximately {total_removed_kg_h:.2f} kg/h.
+IEX suitability:
+{iex_status} ({iex_score}/100)
 
 Main decision drivers:
 {chr(10).join(["- " + d for d in drivers])}
 
-Suggested process train:
-{chr(10).join(["- " + step for step in process_train])}
+Estimated total removed metal load:
+{total_removed_kg_h:.2f} kg/h
 
-This is a simplified screening-level tool only. It is not based on real industrial data and must not be used for design without laboratory precipitation tests, water chemistry validation, sludge testing, and safety review.
+Estimated total remaining dissolved metal concentration after staged treatment:
+{total_remaining_metals:.3f} mg/L
+
+Important note:
+This is a simplified educational model only. It does not include rigorous thermodynamics, kinetics, complexation, ionic strength effects, actual jar testing data, resin breakthrough curves, or real plant data.
 """
 
-st.text_area("Result summary", summary, height=420)
+st.text_area("Result summary", summary, height=520)
