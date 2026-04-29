@@ -256,9 +256,11 @@ with st.sidebar:
 
     st.markdown("### Cost Estimation (Lang Method)")
     equipment_cost_keur  = st.number_input("Major equipment cost (k€)", min_value=0.0, value=500.0,
-        help="Purchased equipment cost as starting point for Lang factor CAPEX estimation")
+        help="Purchased equipment cost as starting point for CAPEX estimation")
     energy_price_eur_kwh = st.number_input("Energy price (€/kWh)", min_value=0.0, value=0.12)
     chemical_unit_cost   = st.number_input("Chemical cost (€/kg avg)", min_value=0.0, value=0.50)
+    cost_method          = st.selectbox("CAPEX method", ["Lang Factor", "Hand-Chilton"],
+        help="Lang: simple factor method ±50–100%. Hand-Chilton: equipment-type factors ±30–50%.")
 
     st.markdown("---")
     st.markdown('<span style="font-size:0.75rem;color:rgba(255,255,255,0.45);">Adven Water Treatment Concept Tool · Internal Demo</span>', unsafe_allow_html=True)
@@ -907,12 +909,55 @@ def iex_suitability(tfp, ss, ht, hmt):
 
 
 # ─────────────────────────────────────────────
-# LANG METHOD CAPEX / OPEX
+# CAPEX / OPEX — LANG + HAND-CHILTON METHODS
 # ─────────────────────────────────────────────
-def lang_capex_opex(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh):
-    lang_factor   = 4.7
-    capex_keur    = equip_keur * lang_factor
-    op_hours      = 8000
+def capex_opex_estimate(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh, method="Lang"):
+    """
+    Two methods:
+    1. Lang Factor (Peters, Timmerhaus & West, Plant Design and Economics, 5th Ed.)
+       - Simple: TIC = f_lang × C_equipment
+       - f_lang = 4.7 for fluid process plants (pumps, tanks, reactors)
+       - Accuracy: Class 5, ±50–100%
+
+    2. Hand-Chilton Method (Hand 1958 / Chilton 1960, refined by Ulrich & Vasudevan 2004)
+       - More detailed: applies individual installation factors per equipment type
+       - Typical factors for water treatment: tanks f=3.1, pumps f=3.5, heat exchangers f=3.5,
+         packed columns f=4.0, vessels/reactors f=4.2, instrumentation f=1.5
+       - Accuracy: Class 4, ±30–50%
+       - Reference: Ulrich G.D. & Vasudevan P.T., Chemical Engineering Process Design and Economics, 2004
+
+    Both use 8,000 h/yr operating basis (continuous 24/7).
+    """
+    op_hours = 8000
+
+    # ── Lang Method ──
+    lang_f   = 4.7
+    capex_lang = equip_keur * lang_f
+
+    # ── Hand-Chilton Method ──
+    # Decompose equipment cost into typical water treatment equipment mix:
+    # 40% tanks/vessels, 20% pumps, 15% instrumentation/controls,
+    # 15% separation equipment (settlers, filters), 10% miscellaneous
+    hc_factors = {
+        "Tanks & reactors (40%)":        (0.40, 4.2),
+        "Pumps & piping (20%)":          (0.20, 3.5),
+        "Instrumentation (15%)":         (0.15, 2.5),
+        "Separation / filtration (15%)": (0.15, 3.8),
+        "Misc. (10%)":                   (0.10, 3.5),
+    }
+    hc_breakdown = {}
+    capex_hc = 0.0
+    for label, (frac, factor) in hc_factors.items():
+        item_equip = equip_keur * frac
+        item_tIC   = item_equip * factor
+        hc_breakdown[label] = {"equip_keur": round(item_equip,1), "factor": factor,
+                                "installed_keur": round(item_tIC,1)}
+        capex_hc += item_tIC
+
+    # Select CAPEX based on method
+    capex_keur = capex_lang if method == "Lang" else capex_hc
+
+    # ── OPEX (shared logic) ──
     base_dose     = 2.0 if pbase == "Lime / Ca(OH)₂" else (0.55 if pbase == "Na₂CO₃" else 1.2)
     chem_kg_yr    = base_dose * flow_m3h * op_hours
     chem_cost     = chem_kg_yr * chem_unit / 1000
@@ -921,37 +966,157 @@ def lang_capex_opex(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh):
     labour_maint  = capex_keur * 0.05
     opex_keur_yr  = chem_cost + energy_cost + labour_maint
     opex_eur_m3   = (opex_keur_yr * 1000) / (flow_m3h * op_hours) if flow_m3h > 0 else 0
+
     return {
-        "capex_keur": round(capex_keur, 0),
-        "opex_keur_yr": round(opex_keur_yr, 1),
-        "opex_eur_m3": round(opex_eur_m3, 3),
-        "chem_cost_keur_yr": round(chem_cost, 1),
-        "energy_cost_keur_yr": round(energy_cost, 1),
+        "capex_keur":           round(capex_keur, 0),
+        "capex_lang_keur":      round(capex_lang, 0),
+        "capex_hc_keur":        round(capex_hc, 0),
+        "hc_breakdown":         hc_breakdown,
+        "lang_factor":          lang_f,
+        "opex_keur_yr":         round(opex_keur_yr, 1),
+        "opex_eur_m3":          round(opex_eur_m3, 3),
+        "chem_cost_keur_yr":    round(chem_cost, 1),
+        "energy_cost_keur_yr":  round(energy_cost, 1),
         "labour_maint_keur_yr": round(labour_maint, 1),
-        "lang_factor": lang_factor
+        "method":               method,
     }
 
+# Keep backward-compat alias
+def lang_capex_opex(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh):
+    return capex_opex_estimate(equip_keur, flow_m3h, pbase, chem_unit, energy_eur_kwh, "Lang")
+
 
 # ─────────────────────────────────────────────
-# CHEMICAL CONSUMPTION
+# CHEMICAL CONSUMPTION — FULL MASS BALANCE
 # ─────────────────────────────────────────────
-def chemical_consumption(flow, ip, tfp, pbase, pacid, ss):
+def chemical_consumption(flow, ip, tfp, pbase, pacid, ss, mets, hmt, ht, sulfate_mgL, need_low_precip, need_high_precip, pbase_used):
+    """
+    Full mass-balance based chemical consumption.
+    8,000 h/yr continuous operation basis.
+
+    Sources:
+    - NaOH/H2SO4 neutralisation: stoichiometric from titration curves,
+      typical buffering factor 1.2-1.5x for industrial streams
+    - Coagulant (FeCl3 or alum): 0.3-0.6 kg/kg SS removed (WEF MOP 8)
+    - Polymer flocculant: 0.5-2 g/m3 for settling improvement
+    - NaOCl for Mn oxidation: 0.77 kg NaOCl per kg Mn (stoichiometric Mn2+ → MnO2)
+    - IEX resin life: Purolite S930/AmberLite IRC748 typically 3-5 years service life,
+      regenerated with H2SO4 (150-200 g/L), ~2 BV acid per regeneration
+    - IEX capacity: iminodiacetate chelating resin ~0.8-1.2 eq/L wet volume
+    """
+    op_h   = 8000
+    results = {}
+
+    def _add(key, reagent, kg_m3, note=""):
+        kg_h  = round(kg_m3 * flow, 3)
+        t_yr  = round(kg_m3 * flow * op_h / 1000, 2)
+        results[key] = {"reagent": reagent, "kg_per_m3": round(kg_m3,4),
+                        "kg_per_h": kg_h, "t_per_yr": t_yr, "note": note}
+
     ph_delta = tfp - ip
-    results  = {}
+
+    # ── 1. Base for pH increase (neutralisation + precipitation) ──
     if ph_delta > 0:
-        factor = 0.45 if pbase == "Lime / Ca(OH)₂" else (0.55 if pbase == "Na₂CO₃" else 0.35)
-        kg_m3  = factor * abs(ph_delta)
-        results["base"] = {"reagent": pbase, "kg_per_m3": round(kg_m3,3),
-            "kg_per_h": round(kg_m3*flow,2), "t_per_yr": round(kg_m3*flow*8000/1000,1)}
+        # Neutralisation stoichiometry + buffer factor 1.3 for industrial stream
+        buf = 1.3
+        if pbase == "Lime / Ca(OH)₂":
+            # Ca(OH)2 MW=74, H2SO4 MW=98; 1 mol H2SO4 needs 1 mol Ca(OH)2
+            # Rough: 0.5 kg Ca(OH)2/pH unit/m3 × buffer
+            kg_m3 = 0.5 * abs(ph_delta) * buf
+            note  = "Ca(OH)₂ — lower cost, adds Ca hardness, produces CaCO₃/Ca(OH)₂ sludge"
+        elif pbase == "Na₂CO₃":
+            kg_m3 = 0.55 * abs(ph_delta) * buf
+            note  = "Na₂CO₃ (soda ash) — used for carbonate precipitation of Ca, CO₃²⁻ adds to Na₂SO₄ stream"
+        else:  # NaOH
+            kg_m3 = 0.40 * abs(ph_delta) * buf
+            note  = "NaOH (50% solution typical) — clean, no Ca addition, preferred for Na₂SO₄ purity"
+        _add("base", pbase, kg_m3, note)
+
+    # ── 2. Acid for pH decrease ──
     elif ph_delta < 0:
-        factor = 0.28 if pacid == "H₂SO₄" else 0.32
-        kg_m3  = factor * abs(ph_delta)
-        results["acid"] = {"reagent": pacid, "kg_per_m3": round(kg_m3,3),
-            "kg_per_h": round(kg_m3*flow,2), "t_per_yr": round(kg_m3*flow*8000/1000,1)}
-    if ss > 10:
-        floc = 0.020 + ss * 0.0002
-        results["flocculant"] = {"reagent": "Polymer flocculant (indicative)", "kg_per_m3": round(floc,4),
-            "kg_per_h": round(floc*flow,3), "t_per_yr": round(floc*flow*8000/1000,2)}
+        if pacid == "H₂SO₄":
+            kg_m3 = 0.30 * abs(ph_delta) * 1.3
+            note  = "H₂SO₄ (98% conc.) — preferred to keep Na₂SO₄ matrix; adds SO₄²⁻ (desired)"
+        else:
+            kg_m3 = 0.34 * abs(ph_delta) * 1.3
+            note  = "HCl — introduces Cl⁻; may affect Na₂SO₄ product purity if Cl spec is tight"
+        _add("acid", pacid, kg_m3, note)
+
+    # ── 3. Coagulant (FeCl3) for metal precipitation stages ──
+    if need_low_precip or need_high_precip:
+        # Typical FeCl3 dose 20-80 mg/L; use 40 mg/L as indicative for industrial stream
+        fecl3_kg_m3 = 0.040
+        _add("coagulant", "FeCl₃ (coagulant, indicative)", fecl3_kg_m3,
+             "Iron coagulant aids colloid destabilisation; dose 20–80 mg/L depending on turbidity and metals load")
+
+    # ── 4. Polymer flocculant ──
+    if ss > 10 or need_low_precip or need_high_precip:
+        floc_kg_m3 = 0.0015 + ss * 0.00005  # 1.5–3 g/m3 range
+        _add("flocculant", "Anionic polymer flocculant", floc_kg_m3,
+             "Anionic polyacrylamide; dose 1–3 g/m3; improves settling of fine hydroxide precipitates (Marchioretto et al., 2005)")
+
+    # ── 5. NaOCl for Mn oxidation (if Mn present and high pH needed) ──
+    mn_conc = mets.get("Mn", 0)
+    if mn_conc > 0.5 and need_high_precip:
+        # Mn2+ + NaOCl → MnO2 + NaCl; MW: Mn=55, NaOCl=74.5
+        # Stoichiometric: 74.5/55 = 1.35 kg NaOCl per kg Mn; +20% excess
+        mn_load_kg_m3 = mn_conc / 1000  # mg/L → kg/m3
+        naocl_kg_m3   = mn_load_kg_m3 * 1.35 * 1.2
+        _add("naocl", "NaOCl (sodium hypochlorite, 12%)", naocl_kg_m3,
+             f"For Mn oxidation — Mn²⁺ + NaOCl → MnO₂↓ + NaCl; stoichiometric + 20% excess. Mn={mn_conc:.1f} mg/L")
+
+    # ── 6. Na2CO3 for Li2CO3 recovery (if Li high) ──
+    li_conc = mets.get("Li", 0)
+    if li_conc > THRESH["li_recovery_low"]:
+        # Li2CO3 precipitation: 2Li+ + Na2CO3 → Li2CO3↓ + 2Na+
+        # MW: Li=6.94, Na2CO3=106; stoichiometric: 106/(2×6.94) = 7.64 kg Na2CO3 per kg Li
+        # Li reports 100% to product stream, assume recovery downstream
+        li_load_kg_m3   = li_conc / 1000
+        na2co3_kg_m3    = li_load_kg_m3 * 7.64 * 1.1  # +10% excess
+        _add("na2co3_li", "Na₂CO₃ (for Li₂CO₃ recovery, downstream)", na2co3_kg_m3,
+             f"2Li⁺ + Na₂CO₃ → Li₂CO₃↓ + 2Na⁺; Li={li_conc:.0f} mg/L. Requires concentration step first. Indicative only.")
+
+    # ── 7. IEX resin consumption ──
+    # Estimate resin volume from metal load
+    # Chelating resin capacity: ~0.9 eq/L wet; typical run length 48-72h between regen
+    # At 8000 h/yr operation, ~110-167 regeneration cycles/yr
+    # Resin life: ~4 years → annual replacement 25% of inventory
+    # Resin sizing: total metal equivalents to be removed per cycle
+    total_metal_load_eq_h = 0  # equivalents/h
+    metal_valence = {"Ni":2,"Co":2,"Mn":2,"Cu":2,"Fe":3,"Al":3,"Ca":2,"Mg":2,"Li":1}
+    metal_mw      = {"Ni":58.7,"Co":58.9,"Mn":54.9,"Cu":63.5,"Fe":55.8,"Al":27.0,"Ca":40.1,"Mg":24.3,"Li":6.94}
+    for m, conc in mets.items():
+        if conc > 0 and m in metal_valence:
+            mol_h   = (conc / 1000 * flow) / metal_mw[m]  # mol/h
+            eq_h    = mol_h * metal_valence[m]
+            total_metal_load_eq_h += eq_h
+
+    if total_metal_load_eq_h > 0:
+        # Assume 48h run between regenerations, 0.9 eq/L resin capacity
+        regen_interval_h     = 48
+        resin_vol_L          = (total_metal_load_eq_h * regen_interval_h) / 0.9
+        regen_per_yr         = op_h / regen_interval_h
+        # H2SO4 regenerant: 200 g/L, 2 bed volumes (BV = resin_vol_L/1000 m3)
+        h2so4_per_regen_kg   = 0.200 * 2 * resin_vol_L  # kg H2SO4 per regen
+        h2so4_yr_t           = h2so4_per_regen_kg * regen_per_yr / 1000
+        # Water rinse: 10 BV per regen
+        rinse_water_m3_yr    = 10 * (resin_vol_L / 1000) * regen_per_yr
+        # Annual resin replacement (25% of inventory, ~€8-12/L for chelating resin)
+        resin_replace_L_yr   = resin_vol_L * 0.25
+        resin_replace_keur   = resin_replace_L_yr * 10.0 / 1000  # €10/L average
+
+        results["iex_resin"] = {
+            "reagent":          "Chelating IEX resin (iminodiacetate)",
+            "resin_volume_L":   round(resin_vol_L, 0),
+            "regen_per_yr":     round(regen_per_yr, 0),
+            "h2so4_regen_t_yr": round(h2so4_yr_t, 2),
+            "rinse_water_m3_yr":round(rinse_water_m3_yr, 0),
+            "resin_replace_L_yr": round(resin_replace_L_yr, 0),
+            "resin_replace_keur_yr": round(resin_replace_keur, 1),
+            "note": (f"Sizing: {resin_vol_L:.0f} L resin @ 48h run, 0.9 eq/L capacity. "
+                     f"{regen_per_yr:.0f} regen/yr. Resin life 4 yr → {resin_replace_L_yr:.0f} L/yr replacement @ ~€10/L. "
+                     "H₂SO₄ regenerant 200 g/L × 2 BV per cycle. Confirm with resin vendor (Purolite S930 / AmberLite IRC748).")
+        }
     return results
 
 
@@ -964,8 +1129,12 @@ steps        = process_train(main_goal, metals, initial_ph, target_final_ph, pre
 drivers      = decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph, heavy_metals_total, hardness_total)
 ph_strategy  = ph_adjustment_strategy(initial_ph, target_final_ph, preferred_base, preferred_acid)
 iex_score, iex_status, iex_comments = iex_suitability(target_final_ph, suspended_solids, hardness_total, heavy_metals_total)
-lang_est     = lang_capex_opex(equipment_cost_keur, flowrate, preferred_base, chemical_unit_cost, energy_price_eur_kwh)
-chem_est     = chemical_consumption(flowrate, initial_ph, target_final_ph, preferred_base, preferred_acid, suspended_solids)
+lang_est     = capex_opex_estimate(equipment_cost_keur, flowrate, preferred_base, chemical_unit_cost, energy_price_eur_kwh, "Lang" if cost_method=="Lang Factor" else "Hand-Chilton")
+need_low_precip  = (metals["Fe"]+metals["Al"]+metals["Cu"]) > THRESH["fe_al_cu_precip"]
+need_high_precip = (metals["Ni"]+metals["Co"]+metals["Mn"]) > THRESH["ni_co_mn_precip"]
+chem_est     = chemical_consumption(flowrate, initial_ph, target_final_ph, preferred_base, preferred_acid,
+                   suspended_solids, metals, heavy_metals_total, hardness_total, sulfate,
+                   need_low_precip, need_high_precip, preferred_base)
 
 results = []; total_removed_kg_h = 0; total_remaining_metals = 0
 for metal, conc in metals.items():
@@ -1024,9 +1193,10 @@ Do not use for design decisions. For expert consultation: <strong>Dr. Kuldeep Si
 # ─────────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Results Overview",
     "Process Train",
+    "Block Flow Diagram",
     "CAPEX / OPEX",
     "Chemical Consumption",
     "Summary Report"
@@ -1108,10 +1278,11 @@ with tab1:
 
 
 # ══════════════════════════════════════════════
-# TAB 2
+# TAB 2 — Process Train (dynamic)
 # ══════════════════════════════════════════════
 with tab2:
     st.markdown('<div class="section-header">Suggested Process Train</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.85rem;color:#555;margin-bottom:12px;">Steps are generated dynamically from the feed composition entered in the sidebar. Change any parameter and the process train updates automatically.</div>', unsafe_allow_html=True)
     flow_html = '<div class="process-flow">'
     for i, step in enumerate(steps, 1):
         nc = "#FF5F15" if i == len(steps) else "#0F6E69"
@@ -1132,73 +1303,248 @@ with tab2:
 
 
 # ══════════════════════════════════════════════
-# TAB 3
+# TAB 3 — Block Flow Diagram
 # ══════════════════════════════════════════════
 with tab3:
-    st.markdown('<div class="section-header">CAPEX Estimation — Lang Factor Method</div>', unsafe_allow_html=True)
-    st.markdown(f"""
-    <div style="font-size:0.85rem;color:#555;margin-bottom:18px;line-height:1.6;">
-    The <b>Lang factor method</b> estimates total installed plant cost by multiplying purchased major equipment cost
-    by a factor covering piping, instrumentation, civil works, electrical, engineering, and contingency.
-    For a fluid/mixed-process water treatment plant the Lang factor is <b>{lang_est["lang_factor"]}</b>.
-    <br><em>CAPEX = {equipment_cost_keur:.0f} k€ × {lang_est["lang_factor"]} = <b>{lang_est["capex_keur"]:.0f} k€</b></em>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Block Flow Diagram — Auto-generated from Process Train</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.85rem;color:#555;margin-bottom:16px;">The BFD below updates automatically based on your feed composition and treatment objective. Each block represents a process unit; streams flow left to right.</div>', unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="cost-grid">
-      <div class="cost-card" style="border-top:4px solid #1E5053;">
-        <div class="cost-title">Estimated CAPEX</div>
-        <div class="cost-value">{lang_est["capex_keur"]:,.0f}<span class="cost-unit">k€</span></div>
-        <div class="cost-note">Lang factor {lang_est["lang_factor"]} · equipment cost {equipment_cost_keur:.0f} k€</div>
-      </div>
-      <div class="cost-card" style="border-top:4px solid #FF5F15;">
-        <div class="cost-title">Estimated Annual OPEX</div>
-        <div class="cost-value">{lang_est["opex_keur_yr"]:,.1f}<span class="cost-unit">k€/yr</span></div>
-        <div class="cost-note">{lang_est["opex_eur_m3"]:.3f} €/m³ treated · 8,000 h/yr basis</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ── Build BFD blocks from process steps ──
+    def classify_step(s):
+        s_lo = s.lower()
+        if "equali" in s_lo:                                return ("Feed", "#5c8a8a", "●")
+        if "bag" in s_lo or "cartridge" in s_lo or "strainer" in s_lo or "screen" in s_lo:
+            return ("Coarse\nFiltration", "#5c8a8a", "▣")
+        if "coagulat" in s_lo or "flocculat" in s_lo:      return ("Coag /\nFloc", "#5c8a8a", "◈")
+        if "stage 1" in s_lo or "low-ph" in s_lo or "low_ph" in s_lo or "ph 4" in s_lo:
+            return ("Stage 1\nPrecip.\n(pH 4–5)", "#0F6E69", "⬡")
+        if "stage 2" in s_lo or "high-ph" in s_lo or "high_ph" in s_lo or "ph 9" in s_lo:
+            return ("Stage 2\nPrecip.\n(pH 9–10)", "#0F6E69", "⬡")
+        if "single stage" in s_lo and ("ph 4" in s_lo or "low" in s_lo):
+            return ("Precipitation\n(pH 4–5)", "#0F6E69", "⬡")
+        if "single stage" in s_lo and ("ph 9" in s_lo or "high" in s_lo or "naoh" in s_lo or "ni/co/mn" in s_lo):
+            return ("Precipitation\n(pH 9–10)", "#0F6E69", "⬡")
+        if "lime soften" in s_lo:                           return ("Lime\nSoftening", "#0F6E69", "⬡")
+        if "solid-liquid" in s_lo or "clarifi" in s_lo or "settler" in s_lo or "lamella" in s_lo or "filter press" in s_lo:
+            return ("Solid-Liquid\nSep.", "#1E5053", "⬢")
+        if "sand filter" in s_lo or "multimedia" in s_lo or "cartridge filter" in s_lo:
+            return ("Guard\nFiltration", "#5c8a8a", "▣")
+        if "ph balanc" in s_lo or "final ph" in s_lo or "ph correct" in s_lo or "recarbonation" in s_lo:
+            return ("pH\nAdjust.", "#7a7a00", "◆")
+        if "ion exchange" in s_lo or "iex" in s_lo or "chelating" in s_lo:
+            return ("IEX\nPolishing", "#FF5F15", "⬟")
+        if "naoh addition" in s_lo or "hydroxide precursor" in s_lo:
+            return ("Hydroxide\nPrecip.", "#0F6E69", "⬡")
+        if "na₂co₃ addition" in s_lo or "carbonate precursor" in s_lo:
+            return ("Carbonate\nPrecip.", "#0F6E69", "⬡")
+        if "lithium recovery" in s_lo or "li₂co₃" in s_lo:
+            return ("Li₂CO₃\nRecovery", "#8B0000", "★")
+        if "clean sodium" in s_lo or "product" in s_lo:    return ("Product\nNa₂SO₄", "#1a5c1a", "●")
+        if "quality check" in s_lo:                         return ("Quality\nCheck", "#1a5c1a", "●")
+        if "ph correction" in s_lo:                         return ("pH\nCorrection", "#7a7a00", "◆")
+        if "mechanical filtration" in s_lo:                 return ("Filtration", "#5c8a8a", "▣")
+        return None
+
+    bfd_blocks = []
+    for step in steps:
+        cls = classify_step(step)
+        if cls:
+            label, color, sym = cls
+            # deduplicate consecutive same labels
+            if not bfd_blocks or bfd_blocks[-1][0] != label:
+                bfd_blocks.append((label, color, sym))
+
+    # ── Render as SVG ──
+    BW, BH, GAP, ROWS_MAX = 110, 70, 44, 3
+    # Layout: wrap into rows of max ROWS_MAX
+    n = len(bfd_blocks)
+    import math
+    n_per_row = min(n, max(4, math.ceil(n / ROWS_MAX)))
+    rows = [bfd_blocks[i:i+n_per_row] for i in range(0, n, n_per_row)]
+    n_rows = len(rows)
+    max_cols = max(len(r) for r in rows)
+
+    SVG_W = max_cols * (BW + GAP) + 60
+    SVG_H = n_rows  * (BH + 60) + 60
+
+    svg_lines = [f'<svg viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg" '
+                 f'style="background:#f7f4ef;border-radius:12px;font-family:Nunito Sans,sans-serif;">']
+
+    # Title
+    svg_lines.append(f'<text x="20" y="28" font-size="13" font-weight="700" fill="#1E5053">Block Flow Diagram — {main_goal[:40]}</text>')
+
+    for ri, row in enumerate(rows):
+        y_top = 50 + ri * (BH + 60)
+        for ci, (label, color, sym) in enumerate(row):
+            x = 20 + ci * (BW + GAP)
+            cx = x + BW // 2
+            cy = y_top + BH // 2
+
+            # Block shadow
+            svg_lines.append(f'<rect x="{x+3}" y="{y_top+3}" width="{BW}" height="{BH}" rx="8" fill="rgba(0,0,0,0.08)"/>')
+            # Block fill
+            svg_lines.append(f'<rect x="{x}" y="{y_top}" width="{BW}" height="{BH}" rx="8" fill="{color}" stroke="#fff" stroke-width="1.5"/>')
+
+            # Label (split on \n)
+            lines_lbl = label.split("\n")
+            lh = 14
+            start_y = cy - (len(lines_lbl)-1)*lh/2
+            for li2, ln in enumerate(lines_lbl):
+                svg_lines.append(f'<text x="{cx}" y="{start_y + li2*lh}" text-anchor="middle" dominant-baseline="middle" font-size="10.5" font-weight="600" fill="#ffffff">{ln}</text>')
+
+            # Arrow to next block (same row)
+            if ci < len(row)-1:
+                ax1 = x + BW
+                ax2 = x + BW + GAP
+                ay  = y_top + BH // 2
+                svg_lines.append(f'<line x1="{ax1}" y1="{ay}" x2="{ax2-6}" y2="{ay}" stroke="#1E5053" stroke-width="2"/>')
+                svg_lines.append(f'<polygon points="{ax2},{ay} {ax2-8},{ay-4} {ax2-8},{ay+4}" fill="#1E5053"/>')
+
+        # Down-arrow to next row
+        if ri < n_rows - 1:
+            last_ci = len(row) - 1
+            lx = 20 + last_ci * (BW + GAP) + BW // 2
+            ly1 = y_top + BH
+            ly2 = y_top + BH + 56
+            # bend line to start of next row
+            nx  = 20 + BW // 2
+            svg_lines.append(f'<polyline points="{lx},{ly1} {lx},{ly2-28} {nx},{ly2-28} {nx},{ly2-6}" fill="none" stroke="#1E5053" stroke-width="2"/>')
+            svg_lines.append(f'<polygon points="{nx},{ly2} {nx-5},{ly2-8} {nx+5},{ly2-8}" fill="#1E5053"/>')
+
+    svg_lines.append("</svg>")
+    bfd_svg = "\n".join(svg_lines)
+    st.markdown(bfd_svg, unsafe_allow_html=True)
+
+    # Legend
+    legend_items = [
+        ("#5c8a8a", "Feed / Filtration"), ("#0F6E69", "Precipitation / Softening"),
+        ("#1E5053", "Solid-Liquid Sep."), ("#7a7a00", "pH Adjustment"),
+        ("#FF5F15", "IEX Polishing"),    ("#8B0000", "Li Recovery"),
+        ("#1a5c1a", "Product"),
+    ]
+    leg_html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;">' + "".join(
+        [f'<span style="display:flex;align-items:center;gap:5px;font-size:0.78rem;color:#444;">' +
+         f'<span style="width:14px;height:14px;border-radius:3px;background:{c};display:inline-block;"></span>{l}</span>'
+         for c,l in legend_items]) + '</div>'
+    st.markdown(leg_html, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════
+# TAB 4 (was TAB 3) — CAPEX / OPEX
+# ══════════════════════════════════════════════
+with tab4:
+    st.markdown('<div class="section-header">CAPEX Estimation</div>', unsafe_allow_html=True)
+    method_name = lang_est["method"]
+    is_hc = method_name == "Hand-Chilton"
+    acc   = "±30–50%" if is_hc else "±50–100%"
+    cls   = "Class 4" if is_hc else "Class 5"
+
+    if is_hc:
+        st.markdown(f"""
+        <div style="font-size:0.85rem;color:#555;margin-bottom:18px;line-height:1.6;">
+        <b>Hand-Chilton Method</b> (Ulrich & Vasudevan, 2004) applies individual installation factors per equipment category.
+        More accurate than the simple Lang factor because it accounts for the different cost build-up ratios of different equipment types.
+        {cls} estimate, accuracy {acc}.
+        <br><em>TIC = Σ (equipment fraction × Hand-Chilton factor × C_equip)</em>
+        </div>""", unsafe_allow_html=True)
+        # Show breakdown
+        hc_rows = [{"Equipment Category": k, "Equip. cost (k€)": v["equip_keur"],
+                     "H-C Factor": v["factor"], "Installed cost (k€)": v["installed_keur"]}
+                   for k, v in lang_est["hc_breakdown"].items()]
+        hc_rows.append({"Equipment Category": "TOTAL", "Equip. cost (k€)": equipment_cost_keur,
+                         "H-C Factor": "—", "Installed cost (k€)": lang_est["capex_hc_keur"]})
+        st.dataframe(pd.DataFrame(hc_rows), use_container_width=True, hide_index=True)
+    else:
+        st.markdown(f"""
+        <div style="font-size:0.85rem;color:#555;margin-bottom:18px;line-height:1.6;">
+        <b>Lang Factor Method</b> (Peters, Timmerhaus & West, 5th Ed.) multiplies purchased equipment cost
+        by a single factor covering all installation costs. Lang factor = <b>{lang_est["lang_factor"]}</b> for fluid-process plants.
+        {cls} estimate, accuracy {acc}.
+        <br><em>CAPEX = {equipment_cost_keur:.0f} k€ × {lang_est["lang_factor"]} = <b>{lang_est["capex_keur"]:.0f} k€</b></em>
+        </div>""", unsafe_allow_html=True)
+
+    col_c1, col_c2, col_c3 = st.columns(3)
+    with col_c1:
+        st.markdown(f"""<div class="cost-card" style="border-top:4px solid #1E5053;">
+          <div class="cost-title">CAPEX ({method_name})</div>
+          <div class="cost-value">{lang_est["capex_keur"]:,.0f}<span class="cost-unit">k€</span></div>
+          <div class="cost-note">Accuracy: {acc}</div></div>""", unsafe_allow_html=True)
+    with col_c2:
+        st.markdown(f"""<div class="cost-card" style="border-top:4px solid #FF5F15;">
+          <div class="cost-title">Annual OPEX</div>
+          <div class="cost-value">{lang_est["opex_keur_yr"]:,.1f}<span class="cost-unit">k€/yr</span></div>
+          <div class="cost-note">{lang_est["opex_eur_m3"]:.3f} €/m³ · 8,000 h/yr</div></div>""", unsafe_allow_html=True)
+    with col_c3:
+        payback = lang_est["capex_keur"] / lang_est["opex_keur_yr"] if lang_est["opex_keur_yr"] > 0 else 0
+        st.markdown(f"""<div class="cost-card" style="border-top:4px solid #0F6E69;">
+          <div class="cost-title">Reference Payback</div>
+          <div class="cost-value">{payback:.1f}<span class="cost-unit">yr</span></div>
+          <div class="cost-note">CAPEX / OPEX ratio (illustrative)</div></div>""", unsafe_allow_html=True)
+
+    if is_hc:
+        st.markdown(f"""<div style="font-size:0.82rem;color:#888;margin:8px 0 16px 0;">
+        Lang equivalent: {lang_est["capex_lang_keur"]:,.0f} k€ | 
+        Hand-Chilton: {lang_est["capex_hc_keur"]:,.0f} k€ | 
+        Difference: {abs(lang_est["capex_hc_keur"]-lang_est["capex_lang_keur"]):,.0f} k€</div>""", unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">OPEX Breakdown</div>', unsafe_allow_html=True)
     opex_df = pd.DataFrame({
-        "Cost Item":  ["Chemicals (base/acid)", "Energy (pump + aeration)", "Labour + Maintenance (5% CAPEX/yr)", "Total OPEX"],
+        "Cost Item":  ["Chemicals (base/acid)", "Energy (pump + aeration est.)", "Labour + Maintenance (5% CAPEX/yr)", "Total OPEX"],
         "k€/yr":      [lang_est["chem_cost_keur_yr"], lang_est["energy_cost_keur_yr"],
                        lang_est["labour_maint_keur_yr"], lang_est["opex_keur_yr"]]
     })
     st.dataframe(opex_df, use_container_width=True, hide_index=True)
 
-    st.markdown("""
+    st.markdown(f"""
     <div class="custom-disclaimer" style="margin-top:16px;">
-    📌 <strong>Methodology note:</strong> Class 5 order-of-magnitude estimates (±50–100% accuracy).
-    For early-stage screening only. A proper Class 3/2 estimate requires vendor quotations, site data, and detailed design.
-    Based on Lang/Chilton approach — see Peters, Timmerhaus & West, <em>Plant Design and Economics for Chemical Engineers</em>.
-    </div>
-    """, unsafe_allow_html=True)
+    📌 <strong>Methodology:</strong> {cls} ({acc}) — early-stage screening only.
+    Lang: Peters, Timmerhaus & West, <em>Plant Design and Economics for Chemical Engineers</em>, 5th Ed.
+    Hand-Chilton: Ulrich & Vasudevan, <em>Chemical Engineering Process Design and Economics</em>, 2nd Ed., 2004.
+    A proper Class 3 estimate requires vendor quotations, detailed P&IDs, and site-specific data.
+    </div>""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
-# TAB 4
+# TAB 5 — Chemical Consumption
 # ══════════════════════════════════════════════
-with tab4:
-    st.markdown('<div class="section-header">Chemical Consumption Estimates</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:0.85rem;color:#555;margin-bottom:16px;line-height:1.6;">Indicative dosing rates based on pH adjustment target and suspended solids. <b>Confirm by jar testing before design.</b></div>', unsafe_allow_html=True)
+with tab5:
+    st.markdown('<div class="section-header">Chemical Consumption — Full Mass Balance (8,000 h/yr)</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.85rem;color:#555;margin-bottom:16px;line-height:1.6;">All chemical quantities calculated from feed composition mass balance. IEX resin sized from actual metal equivalents load. <b>Confirm all doses by jar testing and vendor data before design.</b></div>', unsafe_allow_html=True)
 
-    if not chem_est:
-        st.markdown('<div class="result-card">No significant pH adjustment or chemical addition required for current inputs.</div>', unsafe_allow_html=True)
-    else:
-        for key, val in chem_est.items():
-            icon = "🧪" if key == "base" else ("⚗️" if key == "acid" else "🌀")
-            st.markdown(f"""
-            <div class="result-card {'orange' if key == 'acid' else ''}">
-              <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1rem;font-weight:700;color:#1E5053;margin-bottom:10px;">{icon} {val['reagent']}</div>
-              <div style="display:flex;gap:32px;flex-wrap:wrap;">
-                <div><div class="metric-label">Dose rate</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_m3']} <span style="font-size:0.8rem;color:#888;">kg/m³</span></div></div>
-                <div><div class="metric-label">Flow rate</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_h']} <span style="font-size:0.8rem;color:#888;">kg/h</span></div></div>
-                <div><div class="metric-label">Annual</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['t_per_yr']} <span style="font-size:0.8rem;color:#888;">t/yr</span></div></div>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+    # Separate IEX from regular chemicals
+    chem_regular = {k:v for k,v in chem_est.items() if k != "iex_resin"}
+    iex_data     = chem_est.get("iex_resin", None)
+
+    if not chem_regular and not iex_data:
+        st.markdown('<div class="result-card">No significant chemical addition required for current inputs.</div>', unsafe_allow_html=True)
+
+    # Regular chemicals table
+    if chem_regular:
+        st.markdown('<div class="section-header" style="font-size:1rem;">Process Chemicals</div>', unsafe_allow_html=True)
+        chem_rows = []
+        for key, val in chem_regular.items():
+            chem_rows.append({
+                "Chemical":        val["reagent"],
+                "kg/m³":           val["kg_per_m3"],
+                "kg/h":            val["kg_per_h"],
+                "t/yr":            val["t_per_yr"],
+                "Note":            val.get("note",""),
+            })
+        st.dataframe(pd.DataFrame(chem_rows), use_container_width=True, hide_index=True)
+
+    # IEX resin section
+    if iex_data:
+        st.markdown('<div class="section-header" style="font-size:1rem;">IEX Resin & Regeneration (8,000 h/yr, 48h cycle)</div>', unsafe_allow_html=True)
+        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+        with col_r1:
+            st.markdown(f'<div class="metric-card"><div class="metric-label">Resin Volume</div><div class="metric-value">{iex_data["resin_volume_L"]:,.0f}</div><div class="metric-sub">litres</div></div>', unsafe_allow_html=True)
+        with col_r2:
+            st.markdown(f'<div class="metric-card"><div class="metric-label">Regenerations/yr</div><div class="metric-value">{iex_data["regen_per_yr"]:.0f}</div><div class="metric-sub">cycles/yr</div></div>', unsafe_allow_html=True)
+        with col_r3:
+            st.markdown(f'<div class="metric-card accent"><div class="metric-label">H₂SO₄ regen.</div><div class="metric-value">{iex_data["h2so4_regen_t_yr"]:.1f}</div><div class="metric-sub">t/yr</div></div>', unsafe_allow_html=True)
+        with col_r4:
+            st.markdown(f'<div class="metric-card"><div class="metric-label">Resin replacement</div><div class="metric-value">{iex_data["resin_replace_keur_yr"]:.1f}</div><div class="metric-sub">k€/yr (~25%/yr)</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="custom-disclaimer" style="margin-top:8px;">⚙️ {iex_data["note"]}</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="section-header">Metal Removal Overview</div>', unsafe_allow_html=True)
     metals_load = []
@@ -1215,9 +1561,9 @@ with tab4:
 
 
 # ══════════════════════════════════════════════
-# TAB 5
+# TAB 6 — Summary Report
 # ══════════════════════════════════════════════
-with tab5:
+with tab6:
     st.markdown('<div class="section-header">Concept Summary Report</div>', unsafe_allow_html=True)
     chem_lines = ""
     for key, val in chem_est.items():
