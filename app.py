@@ -462,50 +462,136 @@ def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
         return t, r
 
     # ── CASE D: Moderate metals (10–100 mg/L) ──
+    # Determine how many precipitation stages are actually needed based on which metals are present.
+    # Reference: Marchioretto et al. (2005) — Fe(III) precipitates pH 1.3–4, Al pH 3.5–6,
+    # Ni/Co require pH 9–10, Mn needs pH 10+ for hydroxide (sulfide at pH 6–7).
+    # Lewis (2010) — metal sulfide selectivity: Cu > Ni > Co > Fe > Mn >> Mg, Ca.
+    # KEY RULE: only include a stage if the relevant metals are actually present above threshold.
+    both_groups   = need_low_ph_precip and need_high_ph_precip   # Fe/Al/Cu AND Ni/Co/Mn both elevated
+    only_low_ph   = need_low_ph_precip and not need_high_ph_precip  # only Fe/Al/Cu
+    only_high_ph  = need_high_ph_precip and not need_low_ph_precip  # only Ni/Co/Mn (your exact scenario)
+
     if not need_bulk_precip:
         if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
-            t = "Impurity removal (Fe/Al/Cu) + Ni/Co/Mn hydroxide co-precipitation"
-            r = (f"Ni/Co/Mn at {ni_co_mn:.2f} mg/L is suitable for hydroxide precursor co-precipitation. "
-                 "First remove Fe/Al/Cu impurities at low pH, then raise pH to 9–10 for controlled Ni/Co/Mn hydroxide formation.")
+            if need_low_ph_precip:
+                t = "Low-pH impurity removal (Fe/Al/Cu) + single high-pH Ni/Co/Mn hydroxide co-precipitation"
+                r = (f"Fe/Al/Cu ({fe_al_cu:.2f} mg/L) must be removed first at pH 4–5 (Fe(OH)₃ forms at pH 1.3, Al(OH)₃ at pH 3.5 — Marchioretto et al., 2005). "
+                     f"Then raise pH to 9–10 for controlled Ni/Co/Mn hydroxide precursor formation ({ni_co_mn:.2f} mg/L). Two stages needed.")
+            else:
+                t = "Single high-pH Ni/Co/Mn hydroxide co-precipitation — no low-pH stage required"
+                r = (f"Fe/Al/Cu are below the precipitation threshold ({fe_al_cu:.2f} mg/L) — no low-pH impurity removal stage is needed. "
+                     f"Proceed directly to controlled NaOH dosing at pH 9–10 for Ni/Co/Mn hydroxide precursor formation ({ni_co_mn:.2f} mg/L). "
+                     "Single-stage precipitation is sufficient. Coagulation/flocculation recommended to improve fine particle settling (Marchioretto et al., 2005).")
         elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
-            t = "Impurity removal (Fe/Al/Cu) + Ni/Co/Mn carbonate co-precipitation"
-            r = (f"Ni/Co/Mn at {ni_co_mn:.2f} mg/L is suitable for carbonate precursor recovery. "
-                 "Staged pH control with Na₂CO₃ addition after Fe/Al/Cu removal at low pH.")
+            if need_low_ph_precip:
+                t = "Low-pH impurity removal (Fe/Al/Cu) + single-stage Ni/Co/Mn carbonate precipitation"
+                r = (f"Fe/Al/Cu ({fe_al_cu:.2f} mg/L) removed first at low pH, then Na₂CO₃ dosing for Ni/Co/Mn carbonate precursor ({ni_co_mn:.2f} mg/L).")
+            else:
+                t = "Single-stage Ni/Co/Mn carbonate precipitation — no low-pH stage required"
+                r = (f"Fe/Al/Cu are negligible ({fe_al_cu:.2f} mg/L) — skip low-pH stage entirely. "
+                     f"Direct Na₂CO₃ dosing for Ni/Co/Mn carbonate precipitation ({ni_co_mn:.2f} mg/L). "
+                     "Carbonate dosing must be controlled to avoid Ca co-precipitation if hardness is elevated.")
         elif mg_ == "Wastewater polishing only":
-            t = "Staged pH precipitation + solid-liquid separation + optional IEX polishing"
-            r = (f"For discharge compliance with {hmt:.1f} mg/L total heavy metals, staged hydroxide precipitation is the workhorse technology. "
-                 "Hydroxide precipitation typically achieves 0.5–1.0 mg/L residual under optimised conditions (EPA guidance). "
-                 "IEX polishing adds a final safety margin for stringent permit limits.")
+            if both_groups:
+                t = "Two-stage hydroxide precipitation + solid-liquid separation + optional IEX polishing"
+                r = (f"Both low-pH metals (Fe/Al/Cu: {fe_al_cu:.2f} mg/L) and high-pH metals (Ni/Co/Mn: {ni_co_mn:.2f} mg/L) are elevated. "
+                     "Stage 1 at pH 4–5 removes Fe/Al/Cu; Stage 2 at pH 9–10 removes Ni/Co/Mn. "
+                     "Hydroxide precipitation typically achieves 0.5–1.0 mg/L residual (EPA guidance). IEX adds a polishing safety margin.")
+            elif only_low_ph:
+                t = "Single low-pH precipitation stage (Fe/Al/Cu) + filtration + optional IEX"
+                r = (f"Only Fe/Al/Cu ({fe_al_cu:.2f} mg/L) exceed the precipitation threshold. Ni/Co/Mn ({ni_co_mn:.2f} mg/L) are low — IEX polishing handles residuals. "
+                     "One precipitation stage at pH 4–5 is sufficient. No high-pH stage warranted.")
+            else:
+                t = "Single high-pH precipitation stage (Ni/Co/Mn) + filtration + optional IEX"
+                r = (f"Only Ni/Co/Mn ({ni_co_mn:.2f} mg/L) exceed the threshold. Fe/Al/Cu ({fe_al_cu:.2f} mg/L) are negligible — no low-pH stage needed. "
+                     "One precipitation stage at pH 9–10 is sufficient. "
+                     "Coagulation/flocculation (polymer addition) is recommended to improve settling of fine Ni/Co/Mn hydroxide particles "
+                     "(Marchioretto et al., 2005 — fine hydroxide particles can be colloidal and pass standard filters).")
         else:
-            t = "Staged precipitation (low-pH + high-pH) + filtration + chelating IEX polishing"
-            r = (f"Total heavy metals ({hmt:.1f} mg/L) require a two-stage precipitation approach: "
-                 f"Stage 1 (pH 4–5) for Fe/Al/Cu ({fe_al_cu:.2f} mg/L), "
-                 f"Stage 2 (pH 9–10) for Ni/Co/Mn ({ni_co_mn:.2f} mg/L), "
-                 "followed by solid-liquid separation and chelating IEX polishing to meet product quality targets.")
+            # Clean Na2SO4 / IEX polishing goal
+            if both_groups:
+                t = "Two-stage precipitation (low-pH + high-pH) + filtration + chelating IEX polishing"
+                r = (f"Both Fe/Al/Cu ({fe_al_cu:.2f} mg/L, precipitate pH 4–5) and Ni/Co/Mn ({ni_co_mn:.2f} mg/L, precipitate pH 9–10) are elevated — two stages are required. "
+                     "Stage 1 pH 4–5 removes Fe/Al/Cu; Stage 2 pH 9–10 removes Ni/Co/Mn. "
+                     "Each stage followed by solid-liquid separation before the next. Chelating IEX polishing as final step.")
+            elif only_low_ph:
+                t = "Single low-pH precipitation (Fe/Al/Cu) + filtration + chelating IEX polishing"
+                r = (f"Only Fe/Al/Cu ({fe_al_cu:.2f} mg/L) are above the precipitation threshold (Ni/Co/Mn: {ni_co_mn:.2f} mg/L — below threshold). "
+                     "One low-pH stage at pH 4–5 is sufficient for bulk removal. Chelating IEX handles residual Ni/Co/Mn polishing. "
+                     "Fe(OH)₃ and Al(OH)₃ also co-precipitate trace Cr, Pb, Zn by adsorption (Marchioretto et al., 2005).")
+            else:
+                # only_high_ph: the exact scenario the user described — Ni/Co/Mn only
+                t = "Single high-pH precipitation stage (Ni/Co/Mn only) + coagulation/flocculation + filtration + IEX polishing"
+                r = (f"Fe/Al/Cu are negligible ({fe_al_cu:.2f} mg/L) — no low-pH precipitation stage is needed or warranted. "
+                     f"Only Ni/Co/Mn ({ni_co_mn:.2f} mg/L) require treatment: a single high-pH precipitation stage at pH 9–10 using {pbase} is sufficient. "
+                     "IMPORTANT: Ni/Co/Mn hydroxides form as very fine colloidal particles — coagulation/flocculation with a polymer aid is strongly recommended "
+                     "before solid-liquid separation to improve settling and reduce IEX fouling (Marchioretto et al., 2005; Lewis, 2010). "
+                     "Chelating IEX polishing removes residual Ni/Co/Mn after filtration.")
+        if is_sulfate_rich:
+            r += f" Sodium sulfate ({s:.0f} mg/L SO₄) is unaffected by hydroxide precipitation — it remains in solution as desired."
         return t, r
 
     # ── CASE E: High metals (>100 mg/L) ──
+    # At this load, always need aggressive bulk precipitation.
+    # Single vs two-stage still depends on which groups are present.
+    both_groups  = need_low_ph_precip and need_high_ph_precip
+    only_high_ph = need_high_ph_precip and not need_low_ph_precip
+    only_low_ph  = need_low_ph_precip and not need_high_ph_precip
+
     if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
-        t = "Bulk impurity removal + controlled Ni/Co/Mn hydroxide precursor recovery"
-        r = (f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — bulk precursor recovery is the priority. "
-             "Multi-stage controlled precipitation with tight pH management. IEX polishing of the mother liquor may be appropriate.")
+        if need_low_ph_precip:
+            t = "Bulk Fe/Al/Cu impurity removal (low-pH) + controlled Ni/Co/Mn hydroxide precursor recovery (high-pH)"
+            r = (f"High load — Fe/Al/Cu ({fe_al_cu:.1f} mg/L) must be removed at pH 4–5 before precursor precipitation. "
+                 f"Then controlled NaOH to pH 9–10 for Ni/Co/Mn hydroxide precursor ({ni_co_mn:.1f} mg/L). "
+                 "Coagulation/flocculation essential for fine particle separation at both stages.")
+        else:
+            t = "Single-stage bulk Ni/Co/Mn hydroxide precursor recovery — no Fe/Al/Cu removal needed"
+            r = (f"Fe/Al/Cu negligible ({fe_al_cu:.1f} mg/L). High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — single high-pH precipitation stage. "
+                 "Tight pH control (9–10) essential. Coagulation/flocculation + lamella settling for solid-liquid separation.")
     elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
-        t = "Bulk impurity removal + controlled Ni/Co/Mn carbonate precursor recovery"
-        r = (f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — direct carbonate precipitation after Fe/Al/Cu impurity removal. "
-             "Carbonate dosing must be carefully controlled to avoid co-precipitation of Ca.")
+        if need_low_ph_precip:
+            t = "Bulk impurity removal (low-pH) + Ni/Co/Mn carbonate precursor recovery"
+            r = (f"Remove Fe/Al/Cu ({fe_al_cu:.1f} mg/L) at low pH first, then Na₂CO₃ for Ni/Co/Mn ({ni_co_mn:.1f} mg/L) carbonate precipitation.")
+        else:
+            t = "Single-stage bulk Ni/Co/Mn carbonate precipitation — no Fe/Al/Cu stage needed"
+            r = (f"Fe/Al/Cu negligible ({fe_al_cu:.1f} mg/L). Direct Na₂CO₃ dosing for high Ni/Co/Mn ({ni_co_mn:.1f} mg/L). "
+                 "Ca co-precipitation risk — check hardness ({ht:.0f} mg/L Ca+Mg).")
     elif mg_ == "Wastewater polishing only":
-        t = "Bulk hydroxide precipitation + sulfide polishing stage + solid-liquid separation"
-        r = (f"High metals ({hmt:.1f} mg/L) — primary hydroxide precipitation for bulk removal, "
-             "followed by sulfide precipitation or chelating IEX as a polishing step to meet stringent discharge limits. "
-             "Metal sulfides have 3–5 orders of magnitude lower solubility than hydroxides (Army Corps EM 1110-1-4012).")
+        if both_groups:
+            t = "Two-stage bulk hydroxide precipitation + sulfide polishing + solid-liquid separation"
+            r = (f"High load with both groups elevated — two-stage hydroxide precipitation required. "
+                 f"Stage 1 (pH 4–5) for Fe/Al/Cu ({fe_al_cu:.1f} mg/L); Stage 2 (pH 9–10) for Ni/Co/Mn ({ni_co_mn:.1f} mg/L). "
+                 "For stringent limits, sulfide polishing (TMT-15 or Na₂S) achieves 3–5 orders of magnitude lower residual than hydroxide alone (Lewis, 2010).")
+        elif only_high_ph:
+            t = "Single high-pH bulk precipitation (Ni/Co/Mn) + coagulation/flocculation + sulfide polishing"
+            r = (f"Fe/Al/Cu negligible ({fe_al_cu:.1f} mg/L) — skip low-pH stage. "
+                 f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — single stage pH 9–10 precipitation. "
+                 "Coagulation/flocculation mandatory — Ni/Co/Mn hydroxides form very fine colloidal particles (Marchioretto et al., 2005). "
+                 "Sulfide polishing (Na₂S or biogenic H₂S) as final step for stringent discharge limits (Lewis, 2010).")
+        else:
+            t = "Single low-pH bulk precipitation (Fe/Al/Cu) + filtration + IEX polishing"
+            r = (f"Ni/Co/Mn low ({ni_co_mn:.1f} mg/L) — no high-pH stage needed. "
+                 f"Bulk Fe/Al/Cu ({fe_al_cu:.1f} mg/L) removed at pH 4–5. IEX polishing handles residual Ni/Co/Mn.")
     else:
-        t = "Aggressive multistage bulk precipitation + solid-liquid separation + IEX finishing"
-        r = (f"High total heavy metals ({hmt:.1f} mg/L) make bulk hydroxide precipitation the primary technology. "
-             "Two or three staged pH steps are required. "
-             f"Fe/Al/Cu ({fe_al_cu:.1f} mg/L) precipitate at pH 4–5; Ni/Co/Mn ({ni_co_mn:.1f} mg/L) require pH 9–10+. "
-             "IEX polishing is appropriate only after metals are reduced below ~10 mg/L by precipitation.")
+        if both_groups:
+            t = "Two-stage bulk precipitation (pH 4–5 then pH 9–10) + coagulation + filtration + IEX finishing"
+            r = (f"High load with both metal groups: Fe/Al/Cu ({fe_al_cu:.1f} mg/L) precipitate at pH 4–5, "
+                 f"Ni/Co/Mn ({ni_co_mn:.1f} mg/L) at pH 9–10. Two stages with intermediate solid-liquid separation required. "
+                 "Coagulation/flocculation at each stage. IEX polishing only after bulk metals below ~10 mg/L.")
+        elif only_high_ph:
+            t = "Single high-pH bulk precipitation (Ni/Co/Mn only) + coagulation/flocculation + filtration + IEX polishing"
+            r = (f"Fe/Al/Cu are negligible ({fe_al_cu:.1f} mg/L) — no low-pH stage needed. "
+                 f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) require a single high-pH stage at pH 9–10 with {pbase}. "
+                 "CRITICAL: Ni/Co/Mn hydroxides precipitate as very fine colloidal particles — coagulation/flocculation (anionic polymer) "
+                 "is essential before solid-liquid separation (lamella settler or filter press). "
+                 "Without flocculation, fine particles will foul IEX resin and pass conventional filters (Marchioretto et al., 2005). "
+                 "Chelating IEX polishing for final product quality.")
+        else:
+            t = "Single low-pH bulk precipitation (Fe/Al/Cu) + filtration + IEX polishing"
+            r = (f"Ni/Co/Mn below bulk threshold ({ni_co_mn:.1f} mg/L). Fe/Al/Cu ({fe_al_cu:.1f} mg/L) bulk removal at pH 4–5. "
+                 "IEX polishing handles residual metals.")
     if is_sulfate_rich:
-        r += f" High sulfate ({s:.0f} mg/L SO₄) will remain in solution through hydroxide precipitation — this is the desired outcome for sodium sulfate recovery."
+        r += f" Sodium sulfate ({s:.0f} mg/L SO₄) passes through hydroxide precipitation unaffected — remains in solution as desired."
     return t, r
 
 
@@ -551,20 +637,24 @@ def process_train(mg_, mets, ip, tfp, pbase, pacid, hmt, ss):
 
     # Low/moderate: selective precipitation only where needed
     if need_low_ph_precip:
-        steps.append(f"Stage 1 pH adjustment to pH 4–5 using {pbase} — Fe/Al/Cu precipitation ({fe_al_cu:.1f} mg/L)")
-        steps.append("Stage 1 solid-liquid separation — filter press or lamella settler")
+        stage_label = "Stage 1" if need_high_ph_precip else "Single stage"
+        steps.append(f"{stage_label} pH adjustment to pH 4–5 using {pbase} — Fe/Al/Cu precipitation ({fe_al_cu:.1f} mg/L; Fe(OH)₃ forms pH 1.3, Al(OH)₃ pH 3.5)")
+        steps.append(f"{stage_label} solid-liquid separation — filter press or lamella settler")
 
     if need_high_ph_precip or need_bulk_precip:
+        stage_label = "Stage 2" if need_low_ph_precip else "Single stage"
         if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
-            steps.append(f"Stage 2 controlled NaOH addition — Ni/Co/Mn hydroxide precursor formation (pH 9–10, {ni_co_mn:.1f} mg/L)")
+            steps.append(f"{stage_label} controlled NaOH addition to pH 9–10 — Ni/Co/Mn hydroxide precursor formation ({ni_co_mn:.1f} mg/L)")
         elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
-            steps.append(f"Stage 2 controlled Na₂CO₃ addition — Ni/Co/Mn carbonate precursor formation ({ni_co_mn:.1f} mg/L)")
+            steps.append(f"{stage_label} controlled Na₂CO₃ addition — Ni/Co/Mn carbonate precursor formation ({ni_co_mn:.1f} mg/L)")
         else:
-            steps.append(f"Stage 2 pH adjustment to pH 9–10 using {pbase} — Ni/Co/Mn precipitation ({ni_co_mn:.1f} mg/L)")
-        steps.append("Stage 2 solid-liquid separation — clarifier / lamella settling / filter press")
+            steps.append(f"{stage_label} pH adjustment to pH 9–10 using {pbase} — Ni/Co/Mn precipitation ({ni_co_mn:.1f} mg/L)")
+        steps.append(f"{stage_label} coagulation / flocculation (anionic polymer recommended) — Ni/Co/Mn hydroxides form very fine colloidal particles")
+        steps.append(f"{stage_label} solid-liquid separation — clarifier / lamella settling / filter press")
 
-    if need_coag and (need_low_ph_precip or need_high_ph_precip):
-        steps.append("Coagulation / flocculation aid (polymer) — improve fine precipitate settling")
+    elif need_low_ph_precip:
+        # Low-pH only: still add coag note since fine Fe/Al hydroxide particles form
+        steps.append("Coagulation / flocculation (polymer aid) — Fe/Al/Cu hydroxides may form fine colloidal particles")
 
     # Sulfide polishing for very high metals or stringent limits
     if hmt > THRESH["hmt_bulk"] and mg_ == "Wastewater polishing only":
