@@ -1185,7 +1185,7 @@ st.markdown(f"""
 st.markdown("""
 <div class="custom-disclaimer">
 ⚠️ <strong>Disclaimer:</strong> Hypothetical educational tool only — not based on real project, company data, or confidential information.
-Do not use for design decisions. For expert consultation: <strong>Dr. Kuldeep Singh</strong> — <em>kuldeeep.singh@adven.com</em>
+Do not use for design decisions. For expert consultation: <strong>Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com</strong>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1657,7 +1657,7 @@ DISCLAIMER
 Simplified educational model only. Does not include rigorous
 thermodynamics, kinetics, complexation, ionic strength effects,
 jar testing data, resin breakthrough curves, or real plant data.
-Contact: Dr. Kuldeep Singh — kuldeeep.singh@adven.com
+Contact: Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com
 ════════════════════════════════════════════════════════════════
 """
     st.text_area("Full Screening Report", summary, height=620)
