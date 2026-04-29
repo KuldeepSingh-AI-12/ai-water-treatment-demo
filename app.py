@@ -277,11 +277,29 @@ hardness_total     = ca + mg
 # RULE FUNCTIONS
 # ─────────────────────────────────────────────
 def metal_level_category(hmt):
-    if hmt < 5: return "Low residual metals"
-    elif hmt < 100: return "Moderate metals"
-    else: return "High metals"
+    """
+    Classify total heavy metal load (Ni+Co+Mn+Cu+Fe+Al).
+    Thresholds based on:
+    - <1 mg/L: trace level — direct IEX polishing feasible, no bulk precipitation needed
+    - 1–10 mg/L: low — light pre-treatment + IEX
+    - 10–100 mg/L: moderate — staged precipitation required before IEX
+    - >100 mg/L: high — aggressive bulk precipitation mandatory before any polishing step
+    Reference: hydroxide precipitation typically achieves 0.5–1.0 mg/L residual (EPA/ITRC guidance)
+    """
+    if hmt < 1:    return "Trace metals (< 1 mg/L)"
+    elif hmt < 10:  return "Low metals (1–10 mg/L)"
+    elif hmt < 100: return "Moderate metals (10–100 mg/L)"
+    else:           return "High metals (> 100 mg/L)"
 
 def estimate_stage_removal(metal, stage):
+    """
+    Stage removal efficiencies based on published hydroxide precipitation
+    and chelating IEX selectivity data.
+    Low-pH stage (pH ~4-5): targets Fe3+, Al3+, Cu2+ (precipitate at lower pH)
+    High-pH stage (pH ~9-10): targets Ni2+, Co2+, Mn2+, residual hardness
+    IEX (chelating iminodiacetate resin): selectivity Cu>Ni>Co>Fe>Mn>Ca>Mg>>Li/Na
+    Source: Purolite S930/S920 data; AmberLite IRC748 technical literature
+    """
     if stage == "low_pH":
         if metal in ["Fe", "Al", "Cu"]: return 0.70
         return 0.05
@@ -307,97 +325,337 @@ def multistage_removal(concentration, metal):
     r_iex  = r * estimate_stage_removal(metal, "iex");     r -= r_iex
     return r_low, r_high, r_iex, r
 
+# ── CONCENTRATION-BASED DECISION THRESHOLDS ──────────────────────────
+# These drive ALL recommendation logic below.
+# Based on: EPA chemical precipitation guidance, ITRC mining waste treatment,
+# Purolite/DuPont AmberLite IEX design manuals, hydroxide solubility curves.
+
+THRESH = {
+    # Heavy metals (Ni+Co+Mn+Cu+Fe+Al)
+    "hmt_trace":        1.0,   # mg/L — below this: no precipitation needed at all
+    "hmt_low":         10.0,   # mg/L — below this: light pre-treatment only
+    "hmt_bulk":       100.0,   # mg/L — above this: mandatory bulk precipitation
+
+    # Individual metals
+    "fe_al_cu_precip":  2.0,   # mg/L — Fe/Al/Cu: worth a low-pH precipitation stage
+    "ni_co_mn_precip": 20.0,   # mg/L — Ni/Co/Mn: worth a high-pH precipitation stage
+    "ni_co_mn_bulk":  100.0,   # mg/L — Ni/Co/Mn: bulk recovery viable
+
+    # Suspended solids
+    "ss_filtration":   10.0,   # mg/L — above this: dedicated filtration before IEX
+    "ss_coag":         50.0,   # mg/L — above this: coagulation/flocculation needed
+
+    # Hardness
+    "hardness_warn":  100.0,   # mg/L — Ca+Mg: starts competing with chelating resin
+    "hardness_high":  300.0,   # mg/L — Ca+Mg: significant resin capacity loss
+
+    # Sulfate
+    "so4_high":     30000.0,   # mg/L — sulfate-rich classification
+
+    # pH window for IEX
+    "iex_ph_low":       6.0,
+    "iex_ph_high":      9.0,
+}
+
+
 def ph_adjustment_strategy(ip, tfp, pbase, pacid):
+    """pH strategy logic based on initial pH and precipitation requirements."""
     steps = []
-    if ip < 5:
-        steps.append(f"Initial pH is acidic — use controlled {pbase} dosing for staged precipitation.")
-    elif ip > 10:
-        steps.append(f"Initial pH is high — use controlled {pacid} dosing before IEX if needed.")
+    if ip < 3:
+        steps.append(f"Strongly acidic feed (pH {ip}) — staged {pbase} addition required; rapid neutralisation risks fine precipitate formation, use slow controlled dosing.")
+    elif ip < 5:
+        steps.append(f"Acidic feed (pH {ip}) — controlled {pbase} dosing for staged precipitation; Fe/Al/Cu will begin precipitating around pH 4–5.")
+    elif ip > 11:
+        steps.append(f"Strongly alkaline feed (pH {ip}) — use {pacid} to reduce pH; check for carbonate/hydroxide precipitates already present in feed.")
+    elif ip > 9:
+        steps.append(f"Alkaline feed (pH {ip}) — {pacid} may be needed before IEX if resin requires neutral pH window.")
     else:
-        steps.append("Initial pH is moderate — fine adjustment may be sufficient before polishing.")
-    if tfp < 6 or tfp > 9:
-        steps.append("Target final pH is outside typical IEX window — check resin supplier recommendations.")
+        steps.append(f"Feed pH {ip} is in moderate range — fine pH adjustment to target should be straightforward.")
+
+    if tfp < THRESH["iex_ph_low"] or tfp > THRESH["iex_ph_high"]:
+        steps.append(f"Target pH {tfp} is outside the typical IEX operating window (pH 6–9) — consult resin supplier; some resins tolerate pH 4–10 but efficiency drops outside this range.")
     else:
-        steps.append("Target final pH is suitable for polishing, subject to resin confirmation.")
+        steps.append(f"Target pH {tfp} is within the suitable IEX operating window (pH 6–9).")
     return steps
 
-def select_treatment_goal(mg_, level, s, ss):
-    if mg_ == "Clean sodium sulfate solution / IEX polishing":
-        t = "Multistage precipitation + filtration + chelating IEX polishing"
-        r = ("Goal is a clean sodium sulfate-rich solution. Bulk solids and precipitated metals should be removed "
-             "before final chelating IEX polishing.")
+
+def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
+    """
+    Concentration-aware treatment concept selection.
+    Logic tiers:
+    1. If all metals essentially zero → simple filtration / pH correction only
+    2. If metals trace (<1 mg/L total) → direct IEX polishing, no precipitation
+    3. If metals low (1–10 mg/L) → light pre-treatment + IEX
+    4. If moderate (10–100 mg/L) → staged precipitation + IEX
+    5. If high (>100 mg/L) → aggressive bulk precipitation, IEX optional finishing
+    Crossed with treatment objective (recovery vs. polishing vs. discharge)
+    """
+    fe_al_cu = mets["Fe"] + mets["Al"] + mets["Cu"]
+    ni_co_mn = mets["Ni"] + mets["Co"] + mets["Mn"]
+    need_low_ph_precip  = fe_al_cu  > THRESH["fe_al_cu_precip"]
+    need_high_ph_precip = ni_co_mn  > THRESH["ni_co_mn_precip"]
+    need_bulk_precip    = hmt       > THRESH["hmt_bulk"]
+    need_filtration     = ss        > THRESH["ss_filtration"]
+    need_coag           = ss        > THRESH["ss_coag"]
+    is_sulfate_rich     = s         > THRESH["so4_high"]
+    hardness_concern    = ht        > THRESH["hardness_warn"]
+    metals_negligible   = hmt       < 0.5   # essentially zero
+    metals_trace        = hmt       < THRESH["hmt_trace"]
+    metals_low          = hmt       < THRESH["hmt_low"]
+
+    # ── CASE A: Negligible metals, no precipitation needed at all ──
+    if metals_negligible and not need_filtration:
+        t = "pH correction + direct sodium sulfate product / no precipitation required"
+        r = (f"All dissolved metal concentrations are negligible (total heavy metals: {hmt:.2f} mg/L). "
+             "No precipitation stages are warranted — these would add cost and sludge with no benefit. "
+             "Focus should be on pH correction to target and product quality verification.")
+        if is_sulfate_rich:
+            r += " Sodium sulfate-rich solution is essentially clean — downstream crystallisation or concentration may be the primary consideration."
+        return t, r
+
+    if metals_negligible and need_filtration:
+        t = "Mechanical filtration + pH correction (suspended solids only)"
+        r = (f"Dissolved metal concentrations are negligible (total: {hmt:.2f} mg/L). "
+             f"Suspended solids ({ss} mg/L) are the only treatment driver — mechanical filtration is sufficient. "
+             "No chemical precipitation is needed.")
+        return t, r
+
+    # ── CASE B: Trace metals (<1 mg/L total), direct IEX viable ──
+    if metals_trace:
+        if mg_ in ["Ni/Co/Mn hydroxide precursor recovery", "Ni/Co/Mn carbonate precursor recovery"]:
+            t = "Insufficient Ni/Co/Mn for precursor recovery — consider IEX polishing instead"
+            r = (f"Ni/Co/Mn combined ({ni_co_mn:.2f} mg/L) is too low for economic precursor recovery. "
+                 "Chelating IEX polishing is more appropriate at this concentration level.")
+        else:
+            t = "Direct chelating IEX polishing — no bulk precipitation required"
+            r = (f"Total heavy metals are trace level ({hmt:.2f} mg/L). "
+                 "At these concentrations, bulk pH precipitation is not cost-effective and would generate unnecessary sludge. "
+                 "Direct chelating IEX polishing (e.g. iminodiacetate resin) is the appropriate technology. "
+                 "Selectivity sequence for iminodiacetate resin: Cu > Ni > Co > Fe > Mn > Ca > Mg >> Li/Na.")
+        if need_filtration:
+            r += f" Suspended solids ({ss:.1f} mg/L) must be removed by filtration before the IEX column to prevent fouling."
+        if hardness_concern:
+            r += f" Hardness ({ht:.1f} mg/L Ca+Mg) will compete for resin capacity — consider softening pre-step or oversizing resin volume."
+        return t, r
+
+    # ── CASE C: Low metals (1–10 mg/L), light pre-treatment ──
+    if metals_low:
+        if mg_ in ["Ni/Co/Mn hydroxide precursor recovery", "Ni/Co/Mn carbonate precursor recovery"]:
+            t = "Single-stage precipitation for Ni/Co/Mn precursor + filtration"
+            r = (f"Ni/Co/Mn at {ni_co_mn:.2f} mg/L — marginal for precursor recovery but feasible as a single high-pH precipitation stage. "
+                 "Product purity will be limited by co-precipitation of Ca/Mg impurities.")
+        elif need_high_ph_precip:
+            t = "Light pH adjustment + single-stage precipitation + filtration + IEX polishing"
+            r = (f"Metals are in the low range ({hmt:.2f} mg/L total). A single high-pH precipitation stage for Ni/Co/Mn "
+                 f"({ni_co_mn:.2f} mg/L) followed by filtration and IEX polishing is appropriate. "
+                 "Full multistage precipitation is not warranted at this level.")
+        elif need_low_ph_precip:
+            t = "Single low-pH precipitation step (Fe/Al/Cu) + filtration + IEX polishing"
+            r = (f"Fe/Al/Cu ({fe_al_cu:.2f} mg/L) justify a single low-pH precipitation step (pH ~4–5). "
+                 f"Ni/Co/Mn ({ni_co_mn:.2f} mg/L) are low enough for IEX polishing without further precipitation. ")
+        else:
+            t = "Mechanical filtration + pH correction + chelating IEX polishing"
+            r = (f"Dissolved metals are low ({hmt:.2f} mg/L total) and no individual metal group crosses the precipitation threshold. "
+                 "A single-pass through a chelating IEX column after pH correction and filtration is the most cost-effective route.")
+        if is_sulfate_rich:
+            r += " Sodium sulfate matrix will pass through chelating IEX without significant interference — Na⁺ and SO₄²⁻ have negligible affinity for iminodiacetate resin."
+        return t, r
+
+    # ── CASE D: Moderate metals (10–100 mg/L) ──
+    if not need_bulk_precip:
+        if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
+            t = "Impurity removal (Fe/Al/Cu) + Ni/Co/Mn hydroxide co-precipitation"
+            r = (f"Ni/Co/Mn at {ni_co_mn:.2f} mg/L is suitable for hydroxide precursor co-precipitation. "
+                 "First remove Fe/Al/Cu impurities at low pH, then raise pH to 9–10 for controlled Ni/Co/Mn hydroxide formation.")
+        elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
+            t = "Impurity removal (Fe/Al/Cu) + Ni/Co/Mn carbonate co-precipitation"
+            r = (f"Ni/Co/Mn at {ni_co_mn:.2f} mg/L is suitable for carbonate precursor recovery. "
+                 "Staged pH control with Na₂CO₃ addition after Fe/Al/Cu removal at low pH.")
+        elif mg_ == "Wastewater polishing only":
+            t = "Staged pH precipitation + solid-liquid separation + optional IEX polishing"
+            r = (f"For discharge compliance with {hmt:.1f} mg/L total heavy metals, staged hydroxide precipitation is the workhorse technology. "
+                 "Hydroxide precipitation typically achieves 0.5–1.0 mg/L residual under optimised conditions (EPA guidance). "
+                 "IEX polishing adds a final safety margin for stringent permit limits.")
+        else:
+            t = "Staged precipitation (low-pH + high-pH) + filtration + chelating IEX polishing"
+            r = (f"Total heavy metals ({hmt:.1f} mg/L) require a two-stage precipitation approach: "
+                 f"Stage 1 (pH 4–5) for Fe/Al/Cu ({fe_al_cu:.2f} mg/L), "
+                 f"Stage 2 (pH 9–10) for Ni/Co/Mn ({ni_co_mn:.2f} mg/L), "
+                 "followed by solid-liquid separation and chelating IEX polishing to meet product quality targets.")
+        return t, r
+
+    # ── CASE E: High metals (>100 mg/L) ──
+    if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
+        t = "Bulk impurity removal + controlled Ni/Co/Mn hydroxide precursor recovery"
+        r = (f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — bulk precursor recovery is the priority. "
+             "Multi-stage controlled precipitation with tight pH management. IEX polishing of the mother liquor may be appropriate.")
+    elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
+        t = "Bulk impurity removal + controlled Ni/Co/Mn carbonate precursor recovery"
+        r = (f"High Ni/Co/Mn ({ni_co_mn:.1f} mg/L) — direct carbonate precipitation after Fe/Al/Cu impurity removal. "
+             "Carbonate dosing must be carefully controlled to avoid co-precipitation of Ca.")
     elif mg_ == "Wastewater polishing only":
-        t = "pH precipitation + solid-liquid separation + optional IEX"
-        r = "Goal is residual metal reduction. Precipitation for bulk removal; IEX to polish residual metals."
-    elif mg_ == "Ni/Co/Mn hydroxide precursor recovery":
-        t = "Impurity removal + Ni/Co/Mn hydroxide co-precipitation"
-        r = "Objective is Ni/Co/Mn hydroxide precursor recovery. Impurity control before co-precipitation is essential."
+        t = "Bulk hydroxide precipitation + sulfide polishing stage + solid-liquid separation"
+        r = (f"High metals ({hmt:.1f} mg/L) — primary hydroxide precipitation for bulk removal, "
+             "followed by sulfide precipitation or chelating IEX as a polishing step to meet stringent discharge limits. "
+             "Metal sulfides have 3–5 orders of magnitude lower solubility than hydroxides (Army Corps EM 1110-1-4012).")
     else:
-        t = "Impurity removal + Ni/Co/Mn carbonate co-precipitation"
-        r = "Objective is Ni/Co/Mn carbonate precursor recovery. Carbonate precipitation and pH control are critical."
-    if level == "Low residual metals":
-        r += " Residual metals are low, so IEX polishing is more relevant than aggressive bulk precipitation."
-    if s > 30000:
-        r += " Sulfate-rich matrix — sodium sulfate management is the main downstream consideration."
-    if ss > 10:
-        r += " Suspended solids should be removed before IEX to reduce fouling/pressure drop."
+        t = "Aggressive multistage bulk precipitation + solid-liquid separation + IEX finishing"
+        r = (f"High total heavy metals ({hmt:.1f} mg/L) make bulk hydroxide precipitation the primary technology. "
+             "Two or three staged pH steps are required. "
+             f"Fe/Al/Cu ({fe_al_cu:.1f} mg/L) precipitate at pH 4–5; Ni/Co/Mn ({ni_co_mn:.1f} mg/L) require pH 9–10+. "
+             "IEX polishing is appropriate only after metals are reduced below ~10 mg/L by precipitation.")
+    if is_sulfate_rich:
+        r += f" High sulfate ({s:.0f} mg/L SO₄) will remain in solution through hydroxide precipitation — this is the desired outcome for sodium sulfate recovery."
     return t, r
 
-def process_train(mg_, ip, tfp, pbase, pacid):
-    base_steps = [
-        "Feed equalization tank",
-        "Bag / cartridge filtration — remove large suspended solids",
-        "Stage 1 pH adjustment — early precipitation of Fe, Al, Cu",
-        "Stage 1 solid-liquid separation / sludge removal",
-        "Stage 2 pH adjustment — Ni, Co, Mn precipitation",
-        "Coagulation / flocculation (in-situ or ex-situ) if fine particles remain",
-        "Clarification / lamella settling / filter press",
-        "Sand filter / multimedia filter / cartridge filter to protect IEX",
-        "Final pH balancing before ion exchange polishing",
-        "Chelating ion exchange resin polishing",
-        "Clean sodium sulfate-rich product solution"
-    ]
-    if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
-        base_steps.insert(5, "Controlled NaOH addition — Ni/Co/Mn hydroxide precursor formation")
-    if mg_ == "Ni/Co/Mn carbonate precursor recovery":
-        base_steps.insert(5, "Controlled Na₂CO₃ addition — Ni/Co/Mn carbonate precursor formation")
-    if ip > tfp:
-        base_steps.append(f"Use {pacid} carefully if pH reduction is required before IEX.")
-    elif ip < tfp:
-        base_steps.append(f"Use {pbase} carefully if pH increase is needed for precipitation.")
-    return base_steps
 
-def decision_drivers(mg_, mets, s, ss, ip, tfp):
-    drivers = []
-    if mets["Ni"]+mets["Co"]+mets["Mn"] < 10 and mg_ == "Clean sodium sulfate solution / IEX polishing":
-        drivers.append("Residual transition metals low — polishing more important than bulk precipitation")
-    if mets["Fe"]+mets["Al"]+mets["Cu"] > 2:
-        drivers.append("Fe/Al/Cu can precipitate early and form fine solids")
-    if mets["Ni"]+mets["Co"]+mets["Mn"] > 20:
-        drivers.append("Ni/Co/Mn require higher-pH precipitation before polishing")
-    if hardness_total > 100:
-        drivers.append("Ca/Mg may load chelating resin and reduce polishing capacity")
-    if s > 30000:
-        drivers.append("Sodium sulfate-rich matrix — keep in solution through treatment")
-    if ss > 10:
-        drivers.append("Suspended solids can foul IEX — filtration before resin is critical")
-    if tfp < 6 or tfp > 9:
-        drivers.append("Final pH needs adjustment before IEX polishing")
+def process_train(mg_, mets, ip, tfp, pbase, pacid, hmt, ss):
+    """
+    Builds a tailored process train based on actual feed concentrations.
+    Steps are only included when the concentration data justifies them.
+    """
+    fe_al_cu = mets["Fe"] + mets["Al"] + mets["Cu"]
+    ni_co_mn = mets["Ni"] + mets["Co"] + mets["Mn"]
+    metals_negligible   = hmt  < 0.5
+    metals_trace        = hmt  < THRESH["hmt_trace"]
+    need_low_ph_precip  = fe_al_cu > THRESH["fe_al_cu_precip"]
+    need_high_ph_precip = ni_co_mn > THRESH["ni_co_mn_precip"]
+    need_bulk_precip    = hmt   > THRESH["hmt_bulk"]
+    need_filtration     = ss    > THRESH["ss_filtration"]
+    need_coag           = ss    > THRESH["ss_coag"]
+
+    steps = ["Feed equalization / holding tank"]
+
+    # Solids removal
+    if need_coag:
+        steps.append(f"Coarse screening + coagulation/flocculation (suspended solids {ss:.0f} mg/L — high load)")
+        steps.append("Lamella clarifier or DAF for primary solids removal")
+        steps.append("Cartridge / bag filtration for fine particle polishing")
+    elif need_filtration:
+        steps.append(f"Bag filtration / cartridge filtration (suspended solids {ss:.0f} mg/L)")
+    else:
+        steps.append("Strainer / in-line filter (suspended solids low — precautionary only)")
+
+    # Negligible metals: skip all precipitation
+    if metals_negligible:
+        steps.append(f"pH correction to target {tfp} using {pbase if tfp > ip else pacid}")
+        steps.append("Final quality check — sodium sulfate product")
+        return steps
+
+    # Trace metals: direct IEX, no precipitation
+    if metals_trace:
+        steps.append(f"pH adjustment to {tfp} (IEX operating window pH 6–9) using {pbase if tfp > ip else pacid}")
+        steps.append("Chelating ion exchange resin polishing — direct feed (iminodiacetate type recommended)")
+        steps.append("Clean sodium sulfate-rich product solution")
+        return steps
+
+    # Low/moderate: selective precipitation only where needed
+    if need_low_ph_precip:
+        steps.append(f"Stage 1 pH adjustment to pH 4–5 using {pbase} — Fe/Al/Cu precipitation ({fe_al_cu:.1f} mg/L)")
+        steps.append("Stage 1 solid-liquid separation — filter press or lamella settler")
+
+    if need_high_ph_precip or need_bulk_precip:
+        if mg_ == "Ni/Co/Mn hydroxide precursor recovery":
+            steps.append(f"Stage 2 controlled NaOH addition — Ni/Co/Mn hydroxide precursor formation (pH 9–10, {ni_co_mn:.1f} mg/L)")
+        elif mg_ == "Ni/Co/Mn carbonate precursor recovery":
+            steps.append(f"Stage 2 controlled Na₂CO₃ addition — Ni/Co/Mn carbonate precursor formation ({ni_co_mn:.1f} mg/L)")
+        else:
+            steps.append(f"Stage 2 pH adjustment to pH 9–10 using {pbase} — Ni/Co/Mn precipitation ({ni_co_mn:.1f} mg/L)")
+        steps.append("Stage 2 solid-liquid separation — clarifier / lamella settling / filter press")
+
+    if need_coag and (need_low_ph_precip or need_high_ph_precip):
+        steps.append("Coagulation / flocculation aid (polymer) — improve fine precipitate settling")
+
+    # Sulfide polishing for very high metals or stringent limits
+    if hmt > THRESH["hmt_bulk"] and mg_ == "Wastewater polishing only":
+        steps.append("Sulfide polishing stage (TMT-15 or Na₂S) — for stringent discharge limits, metal sulfides have lower solubility than hydroxides")
+
+    # Filtration before IEX
+    if need_low_ph_precip or need_high_ph_precip:
+        steps.append("Sand filter / multimedia filter / cartridge filter — protect IEX resin from particulates")
+
+    # pH correction before IEX (only if not already in window)
+    if need_low_ph_precip or need_high_ph_precip:
+        steps.append(f"Final pH balancing to {tfp} before ion exchange (IEX window: pH {THRESH['iex_ph_low']}–{THRESH['iex_ph_high']})")
+
+    # IEX only if metals warrant it
+    if not metals_negligible and mg_ != "Ni/Co/Mn hydroxide precursor recovery" and mg_ != "Ni/Co/Mn carbonate precursor recovery":
+        steps.append("Chelating ion exchange resin polishing (iminodiacetate type; selectivity: Cu>Ni>Co>Fe>Mn>Ca>Mg)")
+
+    steps.append("Clean sodium sulfate-rich product solution")
+    return steps
+
+
+def decision_drivers(mg_, mets, s, ss, ip, tfp, hmt, ht):
+    """Concentration-based decision drivers — only flag what is actually relevant."""
+    fe_al_cu = mets["Fe"] + mets["Al"] + mets["Cu"]
+    ni_co_mn = mets["Ni"] + mets["Co"] + mets["Mn"]
+    drivers  = []
+
+    if hmt < 0.5:
+        drivers.append(f"All metals essentially zero — no precipitation warranted, focus on pH and SS control")
+    elif hmt < THRESH["hmt_trace"]:
+        drivers.append(f"Trace metals ({hmt:.2f} mg/L) — direct IEX polishing is the most cost-effective route")
+    elif hmt < THRESH["hmt_low"]:
+        drivers.append(f"Low metals ({hmt:.1f} mg/L) — selective pre-treatment only where concentration thresholds are crossed")
+    else:
+        drivers.append(f"Moderate-to-high metals ({hmt:.1f} mg/L) — staged precipitation is the primary technology")
+
+    if fe_al_cu > THRESH["fe_al_cu_precip"]:
+        drivers.append(f"Fe/Al/Cu = {fe_al_cu:.2f} mg/L — low-pH precipitation stage (pH 4–5) is justified")
+    if ni_co_mn > THRESH["ni_co_mn_precip"]:
+        drivers.append(f"Ni/Co/Mn = {ni_co_mn:.2f} mg/L — high-pH precipitation stage (pH 9–10) is justified")
+    if ht > THRESH["hardness_warn"]:
+        drivers.append(f"Ca/Mg hardness = {ht:.1f} mg/L — competes with chelating resin; consider softening pre-step")
+    if ht > THRESH["hardness_high"]:
+        drivers.append(f"High hardness ({ht:.1f} mg/L) — significant resin capacity loss expected; oversizing or lime softening needed")
+    if s > THRESH["so4_high"]:
+        drivers.append(f"Sulfate = {s:.0f} mg/L — sodium sulfate matrix will remain in solution through hydroxide precipitation (SO₄²⁻ not removed by IEX chelating resin)")
+    if ss > THRESH["ss_filtration"]:
+        drivers.append(f"Suspended solids = {ss:.1f} mg/L — filtration before IEX is essential to prevent fouling")
+    if tfp < THRESH["iex_ph_low"] or tfp > THRESH["iex_ph_high"]:
+        drivers.append(f"Target pH {tfp} is outside IEX operating window (6–9) — pH correction step required")
     if not drivers:
-        drivers.append("No dominant limiting factor identified")
+        drivers.append("Feed is essentially clean — minimal treatment required")
     return drivers
 
+
 def iex_suitability(tfp, ss, ht, hmt):
+    """
+    IEX suitability scoring — penalise each condition that would harm resin performance.
+    Based on chelating IEX design criteria from resin vendor literature
+    (Purolite S930, DuPont AmberLite IRC748).
+    """
     score = 100; comments = []
-    if tfp < 6 or tfp > 9: score -= 25; comments.append("pH should be adjusted before IEX polishing.")
-    if ss > 10:             score -= 25; comments.append("Solids carryover too high — improve filtration before resin.")
-    if ht > 300:            score -= 20; comments.append("High Ca/Mg may consume chelating resin capacity.")
-    if hmt > 100:           score -= 20; comments.append("Metals are high — use precipitation first, not direct IEX.")
+    if hmt < 0.5:
+        comments.append("Metals negligible — IEX not required; pH correction and filtration sufficient.")
+        return 100, "IEX not required for this feed", comments
+    if tfp < THRESH["iex_ph_low"] or tfp > THRESH["iex_ph_high"]:
+        score -= 25
+        comments.append(f"Target pH {tfp} outside IEX window (6–9) — resin efficiency will be reduced.")
+    if ss > THRESH["ss_filtration"]:
+        score -= 25
+        comments.append(f"Suspended solids {ss:.1f} mg/L — must be removed before resin to prevent fouling and pressure drop.")
+    if ht > THRESH["hardness_high"]:
+        score -= 20
+        comments.append(f"High Ca/Mg ({ht:.1f} mg/L) will compete for iminodiacetate resin sites and shorten run length.")
+    elif ht > THRESH["hardness_warn"]:
+        score -= 10
+        comments.append(f"Moderate hardness ({ht:.1f} mg/L) — some resin capacity consumed by Ca/Mg; factor into sizing.")
+    if hmt > THRESH["hmt_bulk"]:
+        score -= 30
+        comments.append(f"Heavy metals too high ({hmt:.1f} mg/L) for direct IEX — bulk precipitation must reduce load below ~10 mg/L first.")
+    elif hmt > THRESH["hmt_low"]:
+        score -= 15
+        comments.append(f"Metals {hmt:.1f} mg/L — precipitation pre-treatment recommended before IEX to protect resin capacity.")
+
+    score = max(score, 0)
     if score >= 80:   status = "Good candidate for IEX polishing"
-    elif score >= 50: status = "Possible, but pre-treatment should be improved"
-    else:             status = "Not ideal for direct IEX — improve precipitation/filtration first"
+    elif score >= 50: status = "Possible, but pre-treatment should be improved first"
+    elif score >= 25: status = "Poor IEX candidate — significant pre-treatment required"
+    else:             status = "Not suitable for direct IEX — bulk treatment must come first"
     if not comments:
-        comments.append("Conditions look reasonable for polishing-level IEX screening.")
+        comments.append("Feed conditions are well-suited for direct chelating IEX polishing.")
     return score, status, comments
 
 
@@ -454,9 +712,9 @@ def chemical_consumption(flow, ip, tfp, pbase, pacid, ss):
 # COMPUTE
 # ─────────────────────────────────────────────
 level        = metal_level_category(heavy_metals_total)
-treatment, reason = select_treatment_goal(main_goal, level, sulfate, suspended_solids)
-steps        = process_train(main_goal, initial_ph, target_final_ph, preferred_base, preferred_acid)
-drivers      = decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph)
+treatment, reason = select_treatment_goal(main_goal, metals, sulfate, suspended_solids, initial_ph, heavy_metals_total, hardness_total)
+steps        = process_train(main_goal, metals, initial_ph, target_final_ph, preferred_base, preferred_acid, heavy_metals_total, suspended_solids)
+drivers      = decision_drivers(main_goal, metals, sulfate, suspended_solids, initial_ph, target_final_ph, heavy_metals_total, hardness_total)
 ph_strategy  = ph_adjustment_strategy(initial_ph, target_final_ph, preferred_base, preferred_acid)
 iex_score, iex_status, iex_comments = iex_suitability(target_final_ph, suspended_solids, hardness_total, heavy_metals_total)
 lang_est     = lang_capex_opex(equipment_cost_keur, flowrate, preferred_base, chemical_unit_cost, energy_price_eur_kwh)
