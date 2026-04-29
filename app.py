@@ -6,17 +6,17 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Battery Leachate / Sodium Sulfate Polishing Demo")
+st.title("Pretreatment DEMO tool for Sodium Sulfate rich effluent stream")
 
 st.warning(
     "Disclaimer: This is a hypothetical educational tool only. "
     "It is not based on any real industrial stream, project, company data, or confidential information. "
-    "Do not use it for design decisions."
+    "Do not use it for design decisions. If you need a solution of your effluent then contact our water team expert Dr. Kuldeep Singh (kuldeeep.singh@adven.com)"
 )
 
 st.write(
-    "A rule-based screening demo for polishing sodium sulfate-rich water after heavy metal precipitation "
-    "in a hypothetical battery recycling / black mass refinery context."
+    "A rule-based screening demo for sodium sulfate-rich effluent "
+    "Pure hypothetical case for learning perspective."
 )
 
 # -----------------------------
