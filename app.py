@@ -2,401 +2,428 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(
-    page_title="Cr(VI) Treatment Selector",
+    page_title="Heavy Metal Precipitation Demo",
     layout="wide"
 )
 
-st.title("Cr(VI) Treatment Selection Demo")
+st.title("Black Mass Refinery Heavy Metal Precipitation Demo")
 
 st.write(
-    "A simple rule-based screening tool for hypothetical hexavalent chromium "
-    "Cr(VI) removal from industrial water."
+    "A simple rule-based screening tool for hypothetical heavy metal removal "
+    "from sodium sulfate-rich black mass refinery wastewater."
 )
 
-st.info(
-    "This is a preliminary educational demo only. Final design requires full water "
-    "chemistry, supplier confirmation, safety review, and lab or pilot testing."
+st.warning(
+    "Disclaimer: This is a purely hypothetical educational example. "
+    "It is not based on any real industrial stream, project, or company data. "
+    "Final design requires full water chemistry, laboratory testing, safety review, "
+    "and process validation."
 )
 
 # -----------------------------
 # Sidebar inputs
 # -----------------------------
 
-st.sidebar.header("Input water data")
+st.sidebar.header("Input stream data")
 
-flowrate = st.sidebar.number_input("Flowrate (m³/h)", min_value=0.1, value=5.0)
+flowrate = st.sidebar.number_input("Flowrate (m³/h)", min_value=0.1, value=10.0)
 
-cr_in = st.sidebar.number_input(
-    "Inlet Cr(VI) concentration (mg/L)",
+initial_ph = st.sidebar.number_input("Initial pH", min_value=0.0, max_value=14.0, value=3.0)
+
+target_ph = st.sidebar.number_input(
+    "Target precipitation pH",
     min_value=0.0,
-    value=1.0
+    max_value=14.0,
+    value=10.0
 )
 
-cr_out = st.sidebar.number_input(
-    "Target outlet Cr(VI) concentration (mg/L)",
-    min_value=0.0,
-    value=0.05
+alkali = st.sidebar.selectbox(
+    "Alkali for pH adjustment",
+    ["NaOH", "Lime / Ca(OH)₂"]
 )
 
-ph = st.sidebar.number_input("pH", min_value=0.0, max_value=14.0, value=7.0)
+st.sidebar.subheader("Dissolved metals (mg/L)")
+
+ni = st.sidebar.number_input("Nickel, Ni (mg/L)", min_value=0.0, value=100.0)
+co = st.sidebar.number_input("Cobalt, Co (mg/L)", min_value=0.0, value=50.0)
+mn = st.sidebar.number_input("Manganese, Mn (mg/L)", min_value=0.0, value=200.0)
+fe = st.sidebar.number_input("Iron, Fe (mg/L)", min_value=0.0, value=20.0)
+al = st.sidebar.number_input("Aluminium, Al (mg/L)", min_value=0.0, value=10.0)
+ca = st.sidebar.number_input("Calcium, Ca (mg/L)", min_value=0.0, value=300.0)
+mg = st.sidebar.number_input("Magnesium, Mg (mg/L)", min_value=0.0, value=100.0)
 
 sulfate = st.sidebar.number_input(
-    "Sulfate concentration (mg/L)",
+    "Sodium sulfate / sulfate level (mg/L as SO₄)",
     min_value=0.0,
-    value=100.0
-)
-
-cod = st.sidebar.number_input("COD (mg/L)", min_value=0.0, value=20.0)
-
-bed_volume = st.sidebar.number_input(
-    "Resin bed volume (m³)",
-    min_value=0.1,
-    value=1.0
-)
-
-bed_depth = st.sidebar.number_input(
-    "Bed depth (mm)",
-    min_value=100.0,
-    value=800.0
+    value=50000.0
 )
 
 # -----------------------------
-# Rule-based treatment logic
+# Helper calculations
 # -----------------------------
 
-def select_treatment(cr_in, cr_out, ph, sulfate, cod):
-    if cr_in <= 0:
-        return (
-            "No Cr(VI) treatment required",
-            "No Cr(VI) is present in the inlet water.",
-            0
+metals = {
+    "Ni": ni,
+    "Co": co,
+    "Mn": mn,
+    "Fe": fe,
+    "Al": al,
+    "Ca": ca,
+    "Mg": mg
+}
+
+def precipitation_status(target_ph):
+    status = {}
+
+    if target_ph >= 4:
+        status["Fe"] = "Likely precipitates as Fe(OH)₃ / Fe hydroxides"
+    else:
+        status["Fe"] = "Mostly soluble"
+
+    if target_ph >= 5:
+        status["Al"] = "Likely precipitates as Al(OH)₃"
+    else:
+        status["Al"] = "Mostly soluble"
+
+    if target_ph >= 8.5:
+        status["Ni"] = "Likely starts precipitating as Ni(OH)₂"
+        status["Co"] = "Likely starts precipitating as Co(OH)₂"
+    else:
+        status["Ni"] = "May remain partly soluble"
+        status["Co"] = "May remain partly soluble"
+
+    if target_ph >= 9.5:
+        status["Mn"] = "Likely precipitates more strongly as Mn hydroxide/oxide"
+    else:
+        status["Mn"] = "May require higher pH or oxidation support"
+
+    if target_ph >= 10:
+        status["Mg"] = "May precipitate as Mg(OH)₂ and increase sludge"
+    else:
+        status["Mg"] = "Mostly remains in solution"
+
+    if target_ph >= 10.5:
+        status["Ca"] = "Scaling/sludge risk may increase"
+    else:
+        status["Ca"] = "Mostly remains in solution, but scaling risk depends on carbonate/sulfate chemistry"
+
+    return status
+
+
+def estimate_removed_fraction(metal, target_ph):
+    if metal == "Fe":
+        return 0.95 if target_ph >= 4 else 0.2
+    if metal == "Al":
+        return 0.95 if target_ph >= 5 else 0.2
+    if metal in ["Ni", "Co"]:
+        if target_ph >= 10:
+            return 0.95
+        elif target_ph >= 8.5:
+            return 0.75
+        else:
+            return 0.2
+    if metal == "Mn":
+        if target_ph >= 10.5:
+            return 0.85
+        elif target_ph >= 9.5:
+            return 0.6
+        else:
+            return 0.15
+    if metal == "Mg":
+        return 0.5 if target_ph >= 10 else 0.05
+    if metal == "Ca":
+        return 0.2 if target_ph >= 10.5 else 0.05
+    return 0
+
+
+def select_treatment(initial_ph, target_ph, sulfate, metals, alkali):
+    total_transition_metals = metals["Ni"] + metals["Co"] + metals["Mn"]
+    total_impurities = metals["Fe"] + metals["Al"] + metals["Ca"] + metals["Mg"]
+
+    if target_ph < 7:
+        treatment = "Partial neutralization / Fe-Al removal step"
+        reason = (
+            "The target pH is relatively low. This condition is more suitable for removing "
+            "Fe and Al hydroxides, while Ni, Co, and Mn may remain largely soluble."
         )
 
-    removal_percent = max(0, (cr_in - cr_out) / cr_in * 100)
-
-    if cr_in > 50 or ph < 2:
-        treatment = "Chemical reduction + Cr(III) hydroxide precipitation"
+    elif 7 <= target_ph < 9:
+        treatment = "Two-stage precipitation recommended"
         reason = (
-            "The Cr(VI) concentration is very high or the water is very acidic. "
-            "In this case, chemical reduction of Cr(VI) to Cr(III), followed by "
-            "hydroxide precipitation, is usually preferred for bulk removal."
+            "This pH range may remove Fe and Al effectively, but Ni, Co, and Mn may need "
+            "a second higher-pH precipitation step."
         )
 
-    elif cod > 200:
-        treatment = "Organic pre-treatment + ion exchange polishing"
+    elif 9 <= target_ph <= 10.5:
+        treatment = "Hydroxide precipitation of Ni/Co/Mn + solid-liquid separation"
         reason = (
-            "COD is high. Organic compounds may foul ion exchange resin, so an "
-            "organic removal or pre-treatment step should be considered before polishing."
-        )
-
-    elif sulfate > 2000:
-        treatment = "Competing anion control + ion exchange polishing"
-        reason = (
-            "Sulfate concentration is high. Sulfate may compete with chromate/dichromate "
-            "on anion exchange resin and reduce effective resin capacity."
-        )
-
-    elif ph < 4:
-        treatment = "Chemical reduction followed by polishing"
-        reason = (
-            "The water is acidic. At lower pH, Cr(VI) speciation and resin performance "
-            "should be carefully evaluated. Chemical reduction followed by polishing may "
-            "be more robust."
-        )
-
-    elif ph > 9:
-        treatment = "Ion exchange polishing with pH and competing-ion checks"
-        reason = (
-            "At higher pH, chromate species are generally suitable for anion exchange, "
-            "but competing ions and regeneration strategy should be carefully checked."
-        )
-
-    elif removal_percent > 90 and cr_in <= 50:
-        treatment = "Strong-base anion exchange resin for Cr(VI) polishing"
-        reason = (
-            "The Cr(VI) concentration is relatively low and the required removal is high. "
-            "Cr(VI) commonly exists as oxyanions such as chromate/dichromate, so "
-            "strong-base anion exchange is a suitable polishing option."
-        )
-
-    elif cr_in < 1:
-        treatment = "Adsorption or ion exchange polishing"
-        reason = (
-            "The inlet Cr(VI) concentration is low. A polishing technology such as "
-            "adsorption or ion exchange may be suitable."
+            "The selected pH is suitable for bulk hydroxide precipitation of transition metals "
+            "such as Ni, Co, and partly Mn."
         )
 
     else:
-        treatment = "Combined treatment approach"
+        treatment = "High-pH precipitation with scaling/sludge risk"
         reason = (
-            "The stream does not clearly fall into one single category. A combined "
-            "approach using chemical treatment and polishing may be appropriate."
+            "Very high pH may improve some metal removal, but it can increase Mg/Ca precipitation, "
+            "scaling, chemical consumption, and sludge production."
         )
 
-    return treatment, reason, removal_percent
+    if sulfate > 50000:
+        reason += " The sulfate level is high, so the treated water may remain sodium sulfate-rich."
 
-
-def alternative_treatment(treatment):
-    treatment_lower = treatment.lower()
-
-    if "chemical reduction" in treatment_lower:
-        return "Alternative: Ion exchange polishing after chemical reduction and precipitation."
-
-    elif "ion exchange" in treatment_lower:
-        return "Alternative: Chemical reduction + precipitation for bulk Cr(VI) removal."
-
-    elif "adsorption" in treatment_lower:
-        return "Alternative: Strong-base anion exchange resin for more selective polishing."
-
-    elif "no cr" in treatment_lower:
-        return "Alternative: No treatment required unless other contaminants are present."
-
+    if alkali == "Lime / Ca(OH)₂":
+        reason += " Lime may reduce chemical cost but can increase calcium load and sludge volume."
     else:
-        return "Alternative: Combined treatment using chemical reduction followed by polishing."
+        reason += " NaOH gives cleaner sodium-based chemistry but can be more expensive."
+
+    return treatment, reason
 
 
-def decision_drivers(cr_in, cr_out, ph, sulfate, cod):
-    drivers = []
-
-    if cr_in > 50:
-        drivers.append("High Cr(VI) concentration")
-    elif cr_in < 1 and cr_in > 0:
-        drivers.append("Low Cr(VI) concentration / polishing case")
-
-    if cr_in > 0:
-        removal_percent = max(0, (cr_in - cr_out) / cr_in * 100)
-        if removal_percent > 90:
-            drivers.append("High removal requirement")
-
-    if cod > 200:
-        drivers.append("High COD / organic fouling risk")
-
-    if sulfate > 2000:
-        drivers.append("High sulfate / competing anion risk")
-
-    if ph < 2:
-        drivers.append("Very acidic pH")
-    elif ph < 4:
-        drivers.append("Low pH condition")
-    elif ph > 10:
-        drivers.append("Very high pH")
-    elif ph > 9:
-        drivers.append("Moderately high pH")
-
-    if not drivers:
-        drivers.append("No dominant limiting factor identified")
-
-    return drivers
-
-
-treatment, reason, removal_percent = select_treatment(
-    cr_in,
-    cr_out,
-    ph,
-    sulfate,
-    cod
-)
-
-alternative = alternative_treatment(treatment)
-drivers = decision_drivers(cr_in, cr_out, ph, sulfate, cod)
+status = precipitation_status(target_ph)
+treatment, reason = select_treatment(initial_ph, target_ph, sulfate, metals, alkali)
 
 # -----------------------------
-# Calculations
+# Mass estimates
 # -----------------------------
 
-cr_removed_kg_h = flowrate * max(0, cr_in - cr_out) / 1000
+results = []
 
-bv_per_h = flowrate / bed_volume if bed_volume > 0 else 0
-ebct_min = 60 / bv_per_h if bv_per_h > 0 else 0
+total_removed_kg_h = 0
 
-resin_capacity_eq_L = 2.4
-theoretical_cr_capacity_g_L = resin_capacity_eq_L * 26
-working_capacity_factor = 0.25
-working_cr_capacity_g_L = theoretical_cr_capacity_g_L * working_capacity_factor
+for metal, conc in metals.items():
+    removed_fraction = estimate_removed_fraction(metal, target_ph)
+    removed_mg_l = conc * removed_fraction
+    remaining_mg_l = conc - removed_mg_l
+    removed_kg_h = flowrate * removed_mg_l / 1000
 
-resin_volume_L = bed_volume * 1000
-estimated_cr_capacity_kg = working_cr_capacity_g_L * resin_volume_L / 1000
+    total_removed_kg_h += removed_kg_h
 
-runtime_h = estimated_cr_capacity_kg / cr_removed_kg_h if cr_removed_kg_h > 0 else 0
+    results.append({
+        "Metal": metal,
+        "Inlet (mg/L)": conc,
+        "Estimated removal (%)": removed_fraction * 100,
+        "Remaining (mg/L)": remaining_mg_l,
+        "Removed (kg/h)": removed_kg_h,
+        "Comment": status.get(metal, "")
+    })
+
+df_results = pd.DataFrame(results)
+
+# Simple neutralization index
+ph_increase = max(0, target_ph - initial_ph)
+alkali_index = flowrate * ph_increase
+
+if alkali == "NaOH":
+    chemical_comment = "NaOH selected: cleaner sodium chemistry, suitable for sodium sulfate-rich systems."
+else:
+    chemical_comment = "Lime selected: lower-cost alkali, but may increase Ca-related scaling and sludge."
 
 # -----------------------------
-# Key results
+# Key outputs
 # -----------------------------
 
-st.subheader("Key results")
+st.subheader("Key screening results")
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Removal required", f"{removal_percent:.1f} %")
-col2.metric("Cr(VI) removed", f"{cr_removed_kg_h:.3f} kg/h")
-col3.metric("Hydraulic loading", f"{bv_per_h:.1f} BV/h")
-col4.metric("EBCT", f"{ebct_min:.1f} min")
+col1.metric("Target pH", f"{target_ph:.1f}")
+col2.metric("pH increase", f"{ph_increase:.1f}")
+col3.metric("Estimated metal sludge load", f"{total_removed_kg_h:.2f} kg/h")
+col4.metric("Alkali demand index", f"{alkali_index:.1f}")
 
-# -----------------------------
-# Treatment recommendation
-# -----------------------------
-
-st.subheader("Treatment recommendation")
+st.subheader("Recommended treatment route")
 st.success(treatment)
 
-st.subheader("Why this treatment?")
+st.subheader("Why this route?")
 st.write(reason)
 
-st.subheader("Alternative treatment option")
-st.info(alternative)
+st.subheader("Suggested process train")
+
+if target_ph < 7:
+    process_train = [
+        "Feed equalization",
+        "Controlled alkali dosing",
+        "Fe/Al hydroxide precipitation",
+        "Clarification or filtration",
+        "Second-stage pH adjustment if Ni/Co/Mn removal is required",
+        "Polishing if needed"
+    ]
+elif target_ph <= 10.5:
+    process_train = [
+        "Feed equalization",
+        "pH adjustment with selected alkali",
+        "Hydroxide precipitation of heavy metals",
+        "Coagulation/flocculation if needed",
+        "Clarification or filtration",
+        "Chelating ion exchange polishing if strict limits are required",
+        "Sodium sulfate-rich treated water management"
+    ]
+else:
+    process_train = [
+        "Feed equalization",
+        "High-pH alkali dosing",
+        "Heavy metal + Mg/Ca precipitation",
+        "Sludge thickening and filtration",
+        "pH correction before discharge/reuse",
+        "Polishing step if required"
+    ]
+
+for step in process_train:
+    st.write(f"- {step}")
+
+# -----------------------------
+# Decision drivers
+# -----------------------------
 
 st.subheader("Key decision drivers")
+
+drivers = []
+
+if ni + co + mn > 100:
+    drivers.append("Significant Ni/Co/Mn load")
+if fe + al > 20:
+    drivers.append("Fe/Al can support hydroxide precipitation and co-precipitation")
+if ca + mg > 300:
+    drivers.append("High Ca/Mg may increase scaling or sludge burden")
+if sulfate > 30000:
+    drivers.append("High sulfate / sodium sulfate-rich matrix")
+if target_ph > 10:
+    drivers.append("High pH increases Mg/Ca precipitation risk")
+if initial_ph < 4:
+    drivers.append("Acidic feed requires neutralization")
+
+if not drivers:
+    drivers.append("No dominant limiting factor identified")
 
 for driver in drivers:
     st.write(f"- {driver}")
 
-st.subheader("Engineering interpretation")
-
-st.info(
-    f"""
-Based on the input conditions, the tool selected:
-
-**{treatment}**
-
-This decision is influenced by:
-- Cr(VI) concentration
-- Required removal efficiency
-- pH
-- COD / organic fouling risk
-- Sulfate / competing anion risk
-
-The tool also suggests:
-
-**{alternative}**
-"""
-)
-
 # -----------------------------
-# Ion exchange design checks
+# Metal removal table
 # -----------------------------
 
-st.subheader("Ion exchange design checks")
+st.subheader("Estimated metal removal")
 
-if 5 <= bv_per_h <= 30:
-    st.success("Hydraulic loading is within the typical 5–30 BV/h screening range.")
+st.dataframe(df_results, use_container_width=True)
+
+# -----------------------------
+# Risk comments
+# -----------------------------
+
+st.subheader("Risk comments")
+
+if sulfate > 50000:
+    st.warning("Very high sulfate: sodium sulfate remains in solution and may require downstream management.")
+
+if target_ph > 10:
+    st.warning("High pH may increase Mg/Ca precipitation, scaling, sludge generation, and alkali consumption.")
+
+if mn > 100 and target_ph < 10:
+    st.warning("Manganese may not be fully removed at this pH. Higher pH or oxidation support may be required.")
+
+if ca + mg > 500:
+    st.warning("High hardness: consider scaling risk and sludge volume.")
+
+if ni + co > 100 and target_ph < 9:
+    st.warning("Ni and Co may need higher pH or polishing to reach strict targets.")
+
+st.info(chemical_comment)
+
+# -----------------------------
+# Polishing recommendation
+# -----------------------------
+
+st.subheader("Polishing recommendation")
+
+if ni + co + mn > 0:
+    st.info(
+        "If strict residual metal limits are required, consider a polishing step such as "
+        "chelating ion exchange after precipitation and filtration."
+    )
 else:
-    st.warning("Hydraulic loading is outside the typical 5–30 BV/h screening range.")
-
-if bed_depth >= 800:
-    st.success("Bed depth meets the 800 mm minimum screening criterion.")
-else:
-    st.warning("Bed depth is below 800 mm. Consider increasing column height or resin volume.")
-
-if ph < 2:
-    st.warning("Very low pH: chemical reduction is likely preferred before polishing.")
-elif ph < 4:
-    st.warning("Low pH: Cr(VI) speciation and resin performance should be checked.")
-elif ph > 10:
-    st.warning("High pH: check competing anions, regeneration strategy, and resin performance.")
-elif ph > 9:
-    st.warning("Moderately high pH: ion exchange may work, but design checks are important.")
-else:
-    st.success("pH is within a reasonable preliminary screening range.")
+    st.write("No transition metals entered; polishing may not be required.")
 
 # -----------------------------
-# Resin estimate
-# -----------------------------
-
-st.subheader("Simplified resin loading estimate")
-
-col5, col6 = st.columns(2)
-
-col5.metric(
-    "Assumed working capacity",
-    f"{working_cr_capacity_g_L:.1f} g Cr(VI)/L resin"
-)
-
-col6.metric(
-    "Estimated runtime before regeneration",
-    f"{runtime_h:.0f} h"
-)
-
-st.caption(
-    "This capacity calculation is simplified. Actual working capacity depends on water chemistry, "
-    "competing ions, resin type, regeneration strategy, and breakthrough criteria."
-)
-
-# -----------------------------
-# Input summary table
+# Input summary
 # -----------------------------
 
 st.subheader("Input summary")
 
-df = pd.DataFrame({
+df_input = pd.DataFrame({
     "Parameter": [
         "Flowrate",
-        "Inlet Cr(VI)",
-        "Target outlet Cr(VI)",
-        "pH",
-        "Sulfate",
-        "COD",
-        "Resin bed volume",
-        "Bed depth",
-        "Hydraulic loading",
-        "EBCT"
+        "Initial pH",
+        "Target precipitation pH",
+        "Alkali",
+        "Ni",
+        "Co",
+        "Mn",
+        "Fe",
+        "Al",
+        "Ca",
+        "Mg",
+        "Sulfate"
     ],
     "Value": [
         flowrate,
-        cr_in,
-        cr_out,
-        ph,
-        sulfate,
-        cod,
-        bed_volume,
-        bed_depth,
-        bv_per_h,
-        ebct_min
+        initial_ph,
+        target_ph,
+        alkali,
+        ni,
+        co,
+        mn,
+        fe,
+        al,
+        ca,
+        mg,
+        sulfate
     ],
     "Unit": [
         "m³/h",
-        "mg/L",
-        "mg/L",
+        "-",
+        "-",
         "-",
         "mg/L",
         "mg/L",
-        "m³",
-        "mm",
-        "BV/h",
-        "min"
+        "mg/L",
+        "mg/L",
+        "mg/L",
+        "mg/L",
+        "mg/L",
+        "mg/L as SO₄"
     ]
 })
 
-st.dataframe(df, use_container_width=True)
+st.dataframe(df_input, use_container_width=True)
 
 # -----------------------------
-# Simple written summary
+# Written summary
 # -----------------------------
 
 st.subheader("Simple interpretation")
 
 summary = f"""
-For this hypothetical Cr(VI) case, the inlet concentration is {cr_in} mg/L and the target outlet concentration is {cr_out} mg/L.
+This hypothetical black mass refinery wastewater contains dissolved Ni, Co, Mn, Fe, Al, Ca, Mg and sulfate.
 
-The required removal is approximately {removal_percent:.1f} %, corresponding to {cr_removed_kg_h:.3f} kg/h of Cr(VI) removed.
-
-The rule-based treatment recommendation is:
+The selected treatment concept is:
 
 {treatment}
 
 Reason:
 {reason}
 
-Alternative option:
-{alternative}
+The target precipitation pH is {target_ph:.1f}, starting from an initial pH of {initial_ph:.1f}.
+The selected alkali is {alkali}.
 
-Key decision drivers:
-{chr(10).join(["- " + driver for driver in drivers])}
+The estimated removed metal load is approximately {total_removed_kg_h:.2f} kg/h.
 
-For ion exchange screening, the hydraulic loading is {bv_per_h:.1f} BV/h and the EBCT is {ebct_min:.1f} minutes.
+Main decision drivers:
+{chr(10).join(["- " + d for d in drivers])}
 
-Using a simplified working capacity assumption of {working_cr_capacity_g_L:.1f} g Cr(VI)/L resin, the estimated operating time before regeneration is approximately {runtime_h:.0f} hours.
+Suggested process train:
+{chr(10).join(["- " + step for step in process_train])}
 
-This is only a screening-level estimate. Final design requires full water chemistry, competing ion analysis, supplier confirmation, safety review, and breakthrough testing.
+This is a simplified screening-level tool only. It is not based on real industrial data and must not be used for design without laboratory precipitation tests, water chemistry validation, sludge testing, and safety review.
 """
 
-st.text_area("Result summary", summary, height=360)
+st.text_area("Result summary", summary, height=420)
