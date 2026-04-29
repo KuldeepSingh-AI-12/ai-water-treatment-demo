@@ -1567,9 +1567,15 @@ with tab6:
     st.markdown('<div class="section-header">Concept Summary Report</div>', unsafe_allow_html=True)
     chem_lines = ""
     for key, val in chem_est.items():
-        chem_lines += f"  - {val['reagent']}: {val['kg_per_m3']} kg/m³ | {val['kg_per_h']} kg/h | {val['t_per_yr']} t/yr\n"
+        if key == "iex_resin":
+            chem_lines += (f"  - {val['reagent']}: {val['resin_volume_L']:.0f} L resin | "
+                           f"{val['regen_per_yr']:.0f} regen/yr | "
+                           f"{val['h2so4_regen_t_yr']:.2f} t H₂SO₄/yr | "
+                           f"resin replacement {val['resin_replace_keur_yr']:.1f} k€/yr\n")
+        else:
+            chem_lines += f"  - {val['reagent']}: {val['kg_per_m3']} kg/m³ | {val['kg_per_h']} kg/h | {val['t_per_yr']} t/yr\n"
     if not chem_lines:
-        chem_lines = "  No major pH adjustment required with current inputs.\n"
+        chem_lines = "  No major chemical addition required with current inputs.\n"
 
     summary = f"""
 ════════════════════════════════════════════════════════════════
