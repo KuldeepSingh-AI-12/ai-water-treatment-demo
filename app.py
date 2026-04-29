@@ -1185,7 +1185,10 @@ st.markdown(f"""
 st.markdown("""
 <div class="custom-disclaimer">
 ⚠️ <strong>Disclaimer:</strong> Hypothetical educational tool only — not based on real project, company data, or confidential information.
-Do not use for design decisions. For expert consultation: <strong>Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com</strong>
+Do not use for design decisions. This tool provides a high-level screening estimate (AACE Class 5, ±50–100% accuracy). It is intended solely for preliminary evaluation and concept development. It does not include rigorous thermodynamics, kinetics, complexation,
+ionic strength effects, jar testing data, resin breakthrough curves,
+or real plant data. Do NOT use these results for investment decisions, detailed design,
+or financial commitments. For expert consultation: <strong>Dr. Kuldeep Singh | Concept Developer, Water Concept Team | Adven — kuldeep.singh@adven.com</strong>
 </div>
 """, unsafe_allow_html=True)
 
