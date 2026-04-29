@@ -345,9 +345,16 @@ THRESH = {
     "ss_filtration":   10.0,   # mg/L — above this: dedicated filtration before IEX
     "ss_coag":         50.0,   # mg/L — above this: coagulation/flocculation needed
 
-    # Hardness
-    "hardness_warn":  100.0,   # mg/L — Ca+Mg: starts competing with chelating resin
-    "hardness_high":  300.0,   # mg/L — Ca+Mg: significant resin capacity loss
+    # Hardness / Ca+Mg softening thresholds
+    # Ca precipitates as CaCO3 at pH >9 (Ksp ~3.3e-9) or Ca(OH)2 at pH ~12.4 — lime softening typical
+    # Mg precipitates as Mg(OH)2 at pH >10–11 (Ksp ~5.6e-12)
+    # Lime softening (Ca(OH)2 addition) removes both: Ca as CaCO3, Mg as Mg(OH)2
+    # Reference: Crittenden et al., MWH's Water Treatment, 3rd Ed.
+    "hardness_warn":  100.0,   # mg/L Ca+Mg: starts to compete with chelating IEX resin
+    "hardness_high":  300.0,   # mg/L Ca+Mg: significant resin capacity penalty — softening warranted
+    "ca_precip":      200.0,   # mg/L Ca alone: Ca precipitation as CaCO3 is worth considering (lime/soda ash softening)
+    "mg_precip":       50.0,   # mg/L Mg alone: Mg(OH)2 precipitation worth considering at pH 10–11
+    "hardness_softening": 400.0,  # mg/L Ca+Mg: dedicated softening stage strongly recommended before IEX
 
     # Sulfate
     "so4_high":     30000.0,   # mg/L — sulfate-rich classification
@@ -668,6 +675,38 @@ def process_train(mg_, mets, ip, tfp, pbase, pacid, hmt, ss):
     if need_low_ph_precip or need_high_ph_precip:
         steps.append(f"Final pH balancing to {tfp} before ion exchange (IEX window: pH {THRESH['iex_ph_low']}–{THRESH['iex_ph_high']})")
 
+    # ── Ca/Mg softening — add dedicated step if hardness is high ──
+    # Ca precipitates as CaCO3 (lime softening, pH 9–10) or removed by Na2CO3 (soda ash)
+    # Mg precipitates as Mg(OH)2 at pH 10–11 (excess lime needed)
+    # If Ca or Mg are elevated and IEX is the next step, softening protects resin capacity.
+    ca_val = mets.get("Ca", 0)
+    mg_val = mets.get("Mg", 0)
+    ht_local = ca_val + mg_val
+    need_softening = ht_local > THRESH["hardness_softening"]
+    ca_only_softening = ca_val > THRESH["ca_precip"] and mg_val <= THRESH["mg_precip"]
+    mg_only_softening = mg_val > THRESH["mg_precip"] and ca_val <= THRESH["ca_precip"]
+
+    if need_softening:
+        steps.append(
+            f"Lime softening stage — Ca ({ca_val:.1f} mg/L) removed as CaCO3 at pH 9–10 using Ca(OH)₂; "
+            f"Mg ({mg_val:.1f} mg/L) removed as Mg(OH)₂ requires pH 10–11 (excess lime); "
+            "Recarbonation step needed to lower pH before IEX. "
+            "Sludge: Ca/Mg sludge is separate from metal hydroxide sludge — handle separately."
+        )
+        steps.append("Clarification / settling of Ca/Mg softening precipitates + recarbonation (CO₂ dosing) to reduce pH")
+    elif ca_only_softening:
+        steps.append(
+            f"Ca softening consideration — Ca = {ca_val:.1f} mg/L. "
+            "Ca can be removed as CaCO3 by soda ash (Na₂CO₃) addition or lime at pH 9–10. "
+            "This reduces IEX resin loading. Check if Ca removal is required for product quality."
+        )
+    elif mg_val > THRESH["mg_precip"] and ht_local > THRESH["hardness_high"]:
+        steps.append(
+            f"Mg softening consideration — Mg = {mg_val:.1f} mg/L. "
+            "Mg(OH)₂ precipitation requires pH 10–11 (excess lime). "
+            "For IEX protection, consider softening pre-step if hardness significantly loads resin."
+        )
+
     # IEX only if metals warrant it
     if not metals_negligible and mg_ != "Ni/Co/Mn hydroxide precursor recovery" and mg_ != "Ni/Co/Mn carbonate precursor recovery":
         steps.append("Chelating ion exchange resin polishing (iminodiacetate type; selectivity: Cu>Ni>Co>Fe>Mn>Ca>Mg)")
@@ -695,10 +734,18 @@ def decision_drivers(mg_, mets, s, ss, ip, tfp, hmt, ht):
         drivers.append(f"Fe/Al/Cu = {fe_al_cu:.2f} mg/L — low-pH precipitation stage (pH 4–5) is justified")
     if ni_co_mn > THRESH["ni_co_mn_precip"]:
         drivers.append(f"Ni/Co/Mn = {ni_co_mn:.2f} mg/L — high-pH precipitation stage (pH 9–10) is justified")
-    if ht > THRESH["hardness_warn"]:
-        drivers.append(f"Ca/Mg hardness = {ht:.1f} mg/L — competes with chelating resin; consider softening pre-step")
-    if ht > THRESH["hardness_high"]:
-        drivers.append(f"High hardness ({ht:.1f} mg/L) — significant resin capacity loss expected; oversizing or lime softening needed")
+    ca_val = mets.get("Ca", 0)
+    mg_val = mets.get("Mg", 0)
+    if ca_val > THRESH["ca_precip"]:
+        drivers.append(f"Ca = {ca_val:.1f} mg/L — Ca precipitates as CaCO3 at pH 9–10 (lime or soda ash softening applicable)")
+    if mg_val > THRESH["mg_precip"]:
+        drivers.append(f"Mg = {mg_val:.1f} mg/L — Mg(OH)₂ precipitation at pH 10–11; may be removed partially during high-pH metal precipitation stage")
+    if ht > THRESH["hardness_softening"]:
+        drivers.append(f"Very high hardness ({ht:.1f} mg/L) — dedicated lime softening stage strongly recommended to protect IEX resin capacity")
+    elif ht > THRESH["hardness_high"]:
+        drivers.append(f"High hardness ({ht:.1f} mg/L) — significant IEX resin capacity penalty; softening pre-step or resin oversizing needed")
+    elif ht > THRESH["hardness_warn"]:
+        drivers.append(f"Moderate hardness ({ht:.1f} mg/L) — Ca/Mg compete with chelating resin; factor into IEX sizing")
     if s > THRESH["so4_high"]:
         drivers.append(f"Sulfate = {s:.0f} mg/L — sodium sulfate matrix will remain in solution through hydroxide precipitation (SO₄²⁻ not removed by IEX chelating resin)")
     if ss > THRESH["ss_filtration"]:
