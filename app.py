@@ -22,7 +22,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Nunito+Sans:wght@300;400;500;600&display=swap');
 
 :root {
     --teal-dark:   #1E5053;
@@ -37,14 +37,14 @@ st.markdown("""
 
 .stApp {
     background: linear-gradient(135deg, #EFEAE4 0%, #f7f4ef 50%, #E8E2D9 100%);
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Nunito Sans', sans-serif;
 }
 
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, var(--teal-dark) 0%, var(--teal-mid) 60%, #0a5550 100%);
     border-right: 3px solid var(--orange);
 }
-[data-testid="stSidebar"] * { color: #e8f5f4 !important; font-family: 'DM Sans', sans-serif !important; }
+[data-testid="stSidebar"] * { color: #e8f5f4 !important; font-family: 'Nunito Sans', sans-serif !important; }
 
 /* Input fields: white background with dark text so values are readable */
 [data-testid="stSidebar"] .stNumberInput input,
@@ -76,7 +76,7 @@ st.markdown("""
     background: rgba(255,255,255,0.85) !important;
 }
 
-h1, h2, h3 { font-family: 'Syne', sans-serif !important; color: var(--teal-dark) !important; }
+h1, h2, h3 { font-family: 'Plus Jakarta Sans', sans-serif !important; color: var(--teal-dark) !important; }
 
 .hero-banner {
     background: linear-gradient(135deg, var(--teal-dark) 0%, var(--teal-mid) 55%, var(--teal-light) 100%);
@@ -89,22 +89,22 @@ h1, h2, h3 { font-family: 'Syne', sans-serif !important; color: var(--teal-dark)
     width:260px; height:260px; border-radius:50%;
     background:rgba(255,95,21,0.15);
 }
-.hero-title { font-family:'Syne',sans-serif; font-size:2.1rem; font-weight:800; color:#ffffff !important; margin:0 0 6px 0; }
-.hero-subtitle { font-family:'DM Sans',sans-serif; font-size:1.05rem; color:rgba(255,255,255,0.80); margin:0 0 12px 0; }
-.hero-badge { display:inline-block; background:var(--orange); color:#fff !important; font-family:'Syne',sans-serif;
+.hero-title { font-family:'Plus Jakarta Sans',sans-serif; font-size:2.1rem; font-weight:800; color:#ffffff !important; margin:0 0 6px 0; }
+.hero-subtitle { font-family:'Nunito Sans',sans-serif; font-size:1.05rem; color:rgba(255,255,255,0.80); margin:0 0 12px 0; }
+.hero-badge { display:inline-block; background:var(--orange); color:#fff !important; font-family:'Plus Jakarta Sans',sans-serif;
     font-size:0.72rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
     padding:4px 12px; border-radius:20px; }
 
-.section-header { font-family:'Syne',sans-serif; font-size:1.15rem; font-weight:700; color:var(--teal-dark) !important;
+.section-header { font-family:'Plus Jakarta Sans',sans-serif; font-size:1.15rem; font-weight:700; color:var(--teal-dark) !important;
     border-left:4px solid var(--orange); padding-left:12px; margin:28px 0 14px 0; letter-spacing:0.01em; }
 
 .metric-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
 .metric-card { background:#fff; border-radius:12px; padding:18px 20px; border-top:4px solid var(--teal-mid);
     box-shadow:0 2px 12px rgba(30,80,83,0.08); }
 .metric-card.accent { border-top-color:var(--orange); }
-.metric-label { font-family:'DM Sans',sans-serif; font-size:0.75rem; font-weight:500; color:var(--text-muted);
+.metric-label { font-family:'Nunito Sans',sans-serif; font-size:0.75rem; font-weight:500; color:var(--text-muted);
     text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
-.metric-value { font-family:'Syne',sans-serif; font-size:1.55rem; font-weight:700; color:var(--teal-dark); line-height:1; }
+.metric-value { font-family:'Plus Jakarta Sans',sans-serif; font-size:1.55rem; font-weight:700; color:var(--teal-dark); line-height:1; }
 .metric-sub { font-size:0.78rem; color:var(--text-muted); margin-top:4px; }
 
 .result-card { background:#fff; border-radius:12px; padding:20px 24px; margin-bottom:16px;
@@ -114,46 +114,46 @@ h1, h2, h3 { font-family: 'Syne', sans-serif !important; color: var(--teal-dark)
 .process-flow { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
 .process-step { display:flex; align-items:flex-start; gap:12px; background:#fff; border-radius:10px;
     padding:12px 16px; box-shadow:0 1px 6px rgba(30,80,83,0.06); }
-.step-num { background:var(--teal-mid); color:#fff; font-family:'Syne',sans-serif; font-weight:700;
+.step-num { background:var(--teal-mid); color:#fff; font-family:'Plus Jakarta Sans',sans-serif; font-weight:700;
     font-size:0.8rem; min-width:28px; height:28px; border-radius:50%;
     display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
-.step-text { font-family:'DM Sans',sans-serif; font-size:0.9rem; color:var(--text-dark); line-height:1.45; }
+.step-text { font-family:'Nunito Sans',sans-serif; font-size:0.9rem; color:var(--text-dark); line-height:1.45; }
 
 .iex-gauge-wrap { display:flex; align-items:center; gap:16px; background:#fff; border-radius:12px;
     padding:20px 24px; box-shadow:0 2px 10px rgba(30,80,83,0.07); margin-bottom:14px; }
-.iex-score-big { font-family:'Syne',sans-serif; font-size:3rem; font-weight:800; color:var(--teal-dark); line-height:1; min-width:80px; }
+.iex-score-big { font-family:'Plus Jakarta Sans',sans-serif; font-size:3rem; font-weight:800; color:var(--teal-dark); line-height:1; min-width:80px; }
 .iex-bar-bg { background:var(--warm-grey); border-radius:999px; height:14px; overflow:hidden; margin-bottom:6px; }
 .iex-bar-fill { height:100%; border-radius:999px; }
 
 .driver-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .driver-chip { background:var(--soft-grey); border:1px solid var(--warm-grey); color:var(--teal-dark);
-    font-family:'DM Sans',sans-serif; font-size:0.82rem; padding:5px 12px; border-radius:20px; line-height:1.3; }
+    font-family:'Nunito Sans',sans-serif; font-size:0.82rem; padding:5px 12px; border-radius:20px; line-height:1.3; }
 
 .cost-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:8px; }
 .cost-card { background:#fff; border-radius:12px; padding:18px 20px; box-shadow:0 2px 10px rgba(30,80,83,0.07); }
-.cost-title { font-family:'Syne',sans-serif; font-size:0.78rem; font-weight:700; color:var(--text-muted);
+.cost-title { font-family:'Plus Jakarta Sans',sans-serif; font-size:0.78rem; font-weight:700; color:var(--text-muted);
     text-transform:uppercase; letter-spacing:0.07em; margin-bottom:8px; }
-.cost-value { font-family:'Syne',sans-serif; font-size:1.6rem; font-weight:700; color:var(--teal-dark); }
+.cost-value { font-family:'Plus Jakarta Sans',sans-serif; font-size:1.6rem; font-weight:700; color:var(--teal-dark); }
 .cost-unit { font-size:0.8rem; color:var(--text-muted); margin-left:4px; }
 .cost-note { font-size:0.75rem; color:var(--text-muted); margin-top:4px; font-style:italic; }
 
 .custom-warning { background:rgba(255,95,21,0.08); border-left:4px solid var(--orange); border-radius:8px;
-    padding:12px 16px; font-family:'DM Sans',sans-serif; font-size:0.88rem; color:#7a2e00; margin-bottom:10px; }
+    padding:12px 16px; font-family:'Nunito Sans',sans-serif; font-size:0.88rem; color:#7a2e00; margin-bottom:10px; }
 .custom-disclaimer { background:rgba(30,80,83,0.07); border:1px solid rgba(30,80,83,0.2); border-radius:10px;
     padding:14px 18px; font-size:0.82rem; color:var(--text-muted); margin-bottom:24px; line-height:1.55; }
 
 [data-testid="stDataFrame"] { border-radius:10px !important; overflow:hidden; box-shadow:0 2px 10px rgba(30,80,83,0.07) !important; }
 
 [data-baseweb="tab-list"] { background:var(--warm-grey) !important; border-radius:10px !important; padding:4px !important; gap:4px !important; }
-[data-baseweb="tab"] { border-radius:7px !important; font-family:'DM Sans',sans-serif !important; font-weight:500 !important; }
+[data-baseweb="tab"] { border-radius:7px !important; font-family:'Nunito Sans',sans-serif !important; font-weight:500 !important; }
 [aria-selected="true"] { background:var(--teal-mid) !important; color:#fff !important; }
 
-textarea { font-family:'DM Sans',sans-serif !important; font-size:0.87rem !important; border-radius:8px !important; }
+textarea { font-family:'Nunito Sans',sans-serif !important; font-size:0.87rem !important; border-radius:8px !important; }
 
 .footer { background:linear-gradient(90deg, var(--teal-dark), var(--teal-mid)); border-radius:12px;
     padding:20px 28px; margin-top:40px; display:flex; align-items:center; justify-content:space-between; }
-.footer-left { font-family:'Syne',sans-serif; font-size:1.1rem; font-weight:700; color:#fff; }
-.footer-right { font-family:'DM Sans',sans-serif; font-size:0.8rem; color:rgba(255,255,255,0.65); text-align:right; }
+.footer-left { font-family:'Plus Jakarta Sans',sans-serif; font-size:1.1rem; font-weight:700; color:#fff; }
+.footer-right { font-family:'Nunito Sans',sans-serif; font-size:0.8rem; color:rgba(255,255,255,0.65); text-align:right; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -494,7 +494,7 @@ with tab1:
         st.markdown('<div class="section-header">Recommended Treatment Concept</div>', unsafe_allow_html=True)
         st.markdown(f"""
         <div class="result-card orange">
-          <div style="font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:700;color:#c44000;margin-bottom:8px;">{treatment}</div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.05rem;font-weight:700;color:#c44000;margin-bottom:8px;">{treatment}</div>
           <div style="font-size:0.88rem;color:#555;line-height:1.55;">{reason}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -510,7 +510,7 @@ with tab1:
         <div class="iex-gauge-wrap">
           <div class="iex-score-big" style="color:{bar_col};">{iex_score}</div>
           <div style="flex:1;">
-            <div style="font-family:'DM Sans';font-size:0.82rem;color:#555;margin-bottom:6px;">{iex_status}</div>
+            <div style="font-family:'Nunito Sans';font-size:0.82rem;color:#555;margin-bottom:6px;">{iex_status}</div>
             <div class="iex-bar-bg"><div class="iex-bar-fill" style="width:{iex_score}%;background:{bar_col};"></div></div>
             <div style="font-size:0.75rem;color:#888;">{iex_score}/100</div>
           </div>
@@ -617,11 +617,11 @@ with tab4:
             icon = "🧪" if key == "base" else ("⚗️" if key == "acid" else "🌀")
             st.markdown(f"""
             <div class="result-card {'orange' if key == 'acid' else ''}">
-              <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;color:#1E5053;margin-bottom:10px;">{icon} {val['reagent']}</div>
+              <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1rem;font-weight:700;color:#1E5053;margin-bottom:10px;">{icon} {val['reagent']}</div>
               <div style="display:flex;gap:32px;flex-wrap:wrap;">
-                <div><div class="metric-label">Dose rate</div><div style="font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_m3']} <span style="font-size:0.8rem;color:#888;">kg/m³</span></div></div>
-                <div><div class="metric-label">Flow rate</div><div style="font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_h']} <span style="font-size:0.8rem;color:#888;">kg/h</span></div></div>
-                <div><div class="metric-label">Annual</div><div style="font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['t_per_yr']} <span style="font-size:0.8rem;color:#888;">t/yr</span></div></div>
+                <div><div class="metric-label">Dose rate</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_m3']} <span style="font-size:0.8rem;color:#888;">kg/m³</span></div></div>
+                <div><div class="metric-label">Flow rate</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['kg_per_h']} <span style="font-size:0.8rem;color:#888;">kg/h</span></div></div>
+                <div><div class="metric-label">Annual</div><div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:1.3rem;font-weight:700;color:#0F6E69;">{val['t_per_yr']} <span style="font-size:0.8rem;color:#888;">t/yr</span></div></div>
               </div>
             </div>
             """, unsafe_allow_html=True)
