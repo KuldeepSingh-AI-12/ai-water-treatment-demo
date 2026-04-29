@@ -45,11 +45,35 @@ st.markdown("""
     border-right: 3px solid var(--orange);
 }
 [data-testid="stSidebar"] * { color: #e8f5f4 !important; font-family: 'DM Sans', sans-serif !important; }
+
+/* Input fields: white background with dark text so values are readable */
 [data-testid="stSidebar"] .stNumberInput input,
-[data-testid="stSidebar"] .stSelectbox > div > div {
-    background: rgba(255,255,255,0.10) !important;
-    border: 1px solid rgba(255,255,255,0.25) !important;
-    color: #fff !important; border-radius: 6px !important;
+[data-testid="stSidebar"] .stNumberInput input:focus,
+[data-testid="stSidebar"] input[type="number"] {
+    background: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.4) !important;
+    color: #1a1a1a !important;
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+}
+
+/* Selectbox: white background with dark text */
+[data-testid="stSidebar"] .stSelectbox > div > div,
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    background: #ffffff !important;
+    border: 1px solid rgba(255,255,255,0.4) !important;
+    color: #1a1a1a !important;
+    border-radius: 6px !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-baseweb="select"] div {
+    color: #1a1a1a !important;
+}
+
+/* Stepper buttons keep light colour */
+[data-testid="stSidebar"] .stNumberInput button {
+    color: #1E5053 !important;
+    background: rgba(255,255,255,0.85) !important;
 }
 
 h1, h2, h3 { font-family: 'Syne', sans-serif !important; color: var(--teal-dark) !important; }
