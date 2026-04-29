@@ -362,6 +362,14 @@ THRESH = {
     # pH window for IEX
     "iex_ph_low":       6.0,
     "iex_ph_high":      9.0,
+
+    # Lithium recovery thresholds
+    # Li2CO3 solubility ~13 g/L at 20°C, decreases with temperature — recovery by Na2CO3 precipitation
+    # Market-grade Li2CO3 requires >99.5% purity — upstream Na2SO4 stream is already compatible
+    # Typical Li recovery projects viable at >200 mg/L Li in feed
+    # At >500 mg/L Li, concentration/crystallisation is economically attractive
+    "li_recovery_low":  200.0,   # mg/L Li: Li recovery worth flagging as option
+    "li_recovery_high": 400.0,   # mg/L Li: Li recovery strongly recommended (typical project threshold)
 }
 
 
@@ -390,41 +398,112 @@ def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
     """
     Concentration-aware treatment concept selection.
     Logic tiers:
-    1. If all metals essentially zero → simple filtration / pH correction only
+    1. If all metals essentially zero → simple filtration / pH correction only, check Li/Ca/Mg
     2. If metals trace (<1 mg/L total) → direct IEX polishing, no precipitation
     3. If metals low (1–10 mg/L) → light pre-treatment + IEX
     4. If moderate (10–100 mg/L) → staged precipitation + IEX
     5. If high (>100 mg/L) → aggressive bulk precipitation, IEX optional finishing
-    Crossed with treatment objective (recovery vs. polishing vs. discharge)
+    Ca/Mg softening and Li recovery flagged as additional concepts throughout.
     """
-    fe_al_cu = mets["Fe"] + mets["Al"] + mets["Cu"]
-    ni_co_mn = mets["Ni"] + mets["Co"] + mets["Mn"]
+    fe_al_cu  = mets["Fe"] + mets["Al"] + mets["Cu"]
+    ni_co_mn  = mets["Ni"] + mets["Co"] + mets["Mn"]
+    li_conc   = mets["Li"]
+    ca_conc   = mets["Ca"]
+    mg_conc   = mets["Mg"]
     need_low_ph_precip  = fe_al_cu  > THRESH["fe_al_cu_precip"]
     need_high_ph_precip = ni_co_mn  > THRESH["ni_co_mn_precip"]
     need_bulk_precip    = hmt       > THRESH["hmt_bulk"]
     need_filtration     = ss        > THRESH["ss_filtration"]
-    need_coag           = ss        > THRESH["ss_coag"]
     is_sulfate_rich     = s         > THRESH["so4_high"]
     hardness_concern    = ht        > THRESH["hardness_warn"]
-    metals_negligible   = hmt       < 0.5   # essentially zero
+    need_softening      = ht        > THRESH["hardness_softening"]
+    ca_softening        = ca_conc   > THRESH["ca_precip"]
+    mg_softening        = mg_conc   > THRESH["mg_precip"]
+    li_recovery_flag    = li_conc   > THRESH["li_recovery_low"]
+    li_recovery_strong  = li_conc   > THRESH["li_recovery_high"]
+    metals_negligible   = hmt       < 0.5
     metals_trace        = hmt       < THRESH["hmt_trace"]
     metals_low          = hmt       < THRESH["hmt_low"]
 
-    # ── CASE A: Negligible metals, no precipitation needed at all ──
+    # ── Helper: build Ca/Mg and Li addendum text ──
+    def _hardness_addendum():
+        notes = []
+        if need_softening:
+            notes.append(
+                f"Ca ({ca_conc:.0f} mg/L) + Mg ({mg_conc:.0f} mg/L) = {ht:.0f} mg/L — "
+                "LIME SOFTENING STAGE REQUIRED before IEX: Ca removed as CaCO₃ (pH 9–10), "
+                "Mg removed as Mg(OH)₂ (pH 10–11 excess lime). Recarbonation (CO₂) needed after softening."
+            )
+        elif ca_softening and mg_softening:
+            notes.append(
+                f"Elevated hardness (Ca {ca_conc:.0f} mg/L, Mg {mg_conc:.0f} mg/L) — "
+                "lime softening or soda ash treatment recommended before IEX to protect resin capacity."
+            )
+        elif ca_softening:
+            notes.append(
+                f"Ca = {ca_conc:.0f} mg/L — consider soda ash (Na₂CO₃) or lime softening to remove Ca as CaCO₃ "
+                "before IEX; reduces resin capacity consumption."
+            )
+        elif mg_softening:
+            notes.append(
+                f"Mg = {mg_conc:.0f} mg/L — Mg(OH)₂ precipitation at pH 10–11 possible; "
+                "partly removed during high-pH metal precipitation if present."
+            )
+        elif hardness_concern:
+            notes.append(
+                f"Moderate hardness ({ht:.0f} mg/L) — Ca/Mg will consume some IEX resin capacity; "
+                "factor into resin volume sizing."
+            )
+        return " ".join(notes)
+
+    def _li_addendum():
+        if li_recovery_strong:
+            return (
+                f" LITHIUM RECOVERY OPPORTUNITY: Li = {li_conc:.0f} mg/L — at this concentration, "
+                "Li recovery as Li₂CO₃ or LiOH·H₂O is commercially attractive. "
+                "Li₂CO₃ (battery-grade, >99.5% purity) precipitates from concentrated solution using Na₂CO₃ "
+                "(solubility ~13 g/L at 20°C, decreasing at elevated temperature). "
+                "Recommended route: evaporative concentration of Na₂SO₄ mother liquor → selective Li₂CO₃ crystallisation "
+                "→ or electrodialysis/nanofiltration for Li concentration followed by LiOH conversion via lime. "
+                "Li remains in solution through all precipitation stages — it reports to the cleaned Na₂SO₄ stream."
+            )
+        elif li_recovery_flag:
+            return (
+                f" LITHIUM NOTE: Li = {li_conc:.0f} mg/L — Li is not removed by hydroxide precipitation or standard IEX. "
+                "It remains concentrated in the Na₂SO₄ product stream. "
+                f"At {li_conc:.0f} mg/L, Li recovery by Na₂CO₃ precipitation or membrane concentration is worth evaluating "
+                "depending on feed volume and market conditions (Li₂CO₃ ~$15–25/kg battery grade)."
+            )
+        elif li_conc > 0:
+            return (
+                f" Li = {li_conc:.0f} mg/L — Li passes through all treatment stages unaffected and "
+                "concentrates in the final Na₂SO₄ product. Monitor Li in product specification."
+            )
+        return ""
+
+    # ── CASE A: Negligible metals ──
     if metals_negligible and not need_filtration:
-        t = "pH correction + direct sodium sulfate product / no precipitation required"
-        r = (f"All dissolved metal concentrations are negligible (total heavy metals: {hmt:.2f} mg/L). "
-             "No precipitation stages are warranted — these would add cost and sludge with no benefit. "
-             "Focus should be on pH correction to target and product quality verification.")
+        t = "pH correction + direct sodium sulfate product"
+        if need_softening or ca_softening or mg_softening:
+            t = "pH correction + Ca/Mg softening + direct sodium sulfate product"
+        r = (f"Heavy metals negligible ({hmt:.2f} mg/L) — no metal precipitation needed. "
+             "Focus on pH correction and product quality.")
+        h = _hardness_addendum()
+        if h: r += " " + h
         if is_sulfate_rich:
-            r += " Sodium sulfate-rich solution is essentially clean — downstream crystallisation or concentration may be the primary consideration."
+            r += " Sodium sulfate product is essentially clean — downstream concentration/crystallisation may be the primary next step."
+        r += _li_addendum()
         return t, r
 
     if metals_negligible and need_filtration:
-        t = "Mechanical filtration + pH correction (suspended solids only)"
-        r = (f"Dissolved metal concentrations are negligible (total: {hmt:.2f} mg/L). "
-             f"Suspended solids ({ss} mg/L) are the only treatment driver — mechanical filtration is sufficient. "
-             "No chemical precipitation is needed.")
+        t = "Mechanical filtration + pH correction"
+        if need_softening or ca_softening:
+            t = "Mechanical filtration + Ca/Mg softening + pH correction"
+        r = (f"Heavy metals negligible ({hmt:.2f} mg/L), SS = {ss:.0f} mg/L — filtration is the primary treatment step. "
+             "No chemical precipitation for metals is needed.")
+        h = _hardness_addendum()
+        if h: r += " " + h
+        r += _li_addendum()
         return t, r
 
     # ── CASE B: Trace metals (<1 mg/L total), direct IEX viable ──
@@ -441,8 +520,9 @@ def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
                  "Selectivity sequence for iminodiacetate resin: Cu > Ni > Co > Fe > Mn > Ca > Mg >> Li/Na.")
         if need_filtration:
             r += f" Suspended solids ({ss:.1f} mg/L) must be removed by filtration before the IEX column to prevent fouling."
-        if hardness_concern:
-            r += f" Hardness ({ht:.1f} mg/L Ca+Mg) will compete for resin capacity — consider softening pre-step or oversizing resin volume."
+        h = _hardness_addendum()
+        if h: r += " | HARDNESS: " + h
+        r += _li_addendum()
         return t, r
 
     # ── CASE C: Low metals (1–10 mg/L), light pre-treatment ──
@@ -465,7 +545,10 @@ def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
             r = (f"Dissolved metals are low ({hmt:.2f} mg/L total) and no individual metal group crosses the precipitation threshold. "
                  "A single-pass through a chelating IEX column after pH correction and filtration is the most cost-effective route.")
         if is_sulfate_rich:
-            r += " Sodium sulfate matrix will pass through chelating IEX without significant interference — Na⁺ and SO₄²⁻ have negligible affinity for iminodiacetate resin."
+            r += " Sodium sulfate matrix passes through chelating IEX without interference — Na⁺ and SO₄²⁻ have negligible affinity for iminodiacetate resin."
+        h = _hardness_addendum()
+        if h: r += " | HARDNESS: " + h
+        r += _li_addendum()
         return t, r
 
     # ── CASE D: Moderate metals (10–100 mg/L) ──
@@ -599,6 +682,10 @@ def select_treatment_goal(mg_, mets, s, ss, ip, hmt, ht):
                  "IEX polishing handles residual metals.")
     if is_sulfate_rich:
         r += f" Sodium sulfate ({s:.0f} mg/L SO₄) passes through hydroxide precipitation unaffected — remains in solution as desired."
+    # Append Ca/Mg and Li notes to ALL cases
+    h = _hardness_addendum()
+    if h: r += " | HARDNESS: " + h
+    r += _li_addendum()
     return t, r
 
 
@@ -711,6 +798,21 @@ def process_train(mg_, mets, ip, tfp, pbase, pacid, hmt, ss):
     if not metals_negligible and mg_ != "Ni/Co/Mn hydroxide precursor recovery" and mg_ != "Ni/Co/Mn carbonate precursor recovery":
         steps.append("Chelating ion exchange resin polishing (iminodiacetate type; selectivity: Cu>Ni>Co>Fe>Mn>Ca>Mg)")
 
+    li_val = mets.get("Li", 0)
+    if li_val > THRESH["li_recovery_high"]:
+        steps.append(
+            f"LITHIUM RECOVERY STEP (optional downstream): Li = {li_val:.0f} mg/L — "
+            "Li concentrates in cleaned Na₂SO₄ stream. Recovery options: "
+            "(a) Evaporative concentration → Na₂CO₃ addition → Li₂CO₃ crystallisation (Ksp ~8.7×10⁻⁴, solubility decreases at 60–80°C); "
+            "(b) Nanofiltration/electrodialysis for selective Li concentration; "
+            "(c) Lime conversion of Li₂CO₃ → LiOH·H₂O (battery grade). "
+            "Consult lithium recovery specialist before committing to route."
+        )
+    elif li_val > THRESH["li_recovery_low"]:
+        steps.append(
+            f"LITHIUM NOTE: Li = {li_val:.0f} mg/L — passes through all stages into Na₂SO₄ product stream. "
+            "Li recovery by Na₂CO₃ precipitation or membrane concentration worth evaluating at this concentration."
+        )
     steps.append("Clean sodium sulfate-rich product solution")
     return steps
 
@@ -747,11 +849,19 @@ def decision_drivers(mg_, mets, s, ss, ip, tfp, hmt, ht):
     elif ht > THRESH["hardness_warn"]:
         drivers.append(f"Moderate hardness ({ht:.1f} mg/L) — Ca/Mg compete with chelating resin; factor into IEX sizing")
     if s > THRESH["so4_high"]:
-        drivers.append(f"Sulfate = {s:.0f} mg/L — sodium sulfate matrix will remain in solution through hydroxide precipitation (SO₄²⁻ not removed by IEX chelating resin)")
+        drivers.append(f"Sulfate = {s:.0f} mg/L — sodium sulfate matrix remains in solution through all precipitation stages (desired outcome)")
     if ss > THRESH["ss_filtration"]:
         drivers.append(f"Suspended solids = {ss:.1f} mg/L — filtration before IEX is essential to prevent fouling")
     if tfp < THRESH["iex_ph_low"] or tfp > THRESH["iex_ph_high"]:
         drivers.append(f"Target pH {tfp} is outside IEX operating window (6–9) — pH correction step required")
+    # Lithium drivers
+    li_val = mets.get("Li", 0)
+    if li_val > THRESH["li_recovery_high"]:
+        drivers.append(f"LITHIUM RECOVERY OPPORTUNITY: Li = {li_val:.0f} mg/L — Li₂CO₃ crystallisation commercially viable; Li concentrates in Na₂SO₄ product stream")
+    elif li_val > THRESH["li_recovery_low"]:
+        drivers.append(f"Li = {li_val:.0f} mg/L — Li recovery worth evaluating (Na₂CO₃ precipitation or membrane concentration route)")
+    elif li_val > 0:
+        drivers.append(f"Li = {li_val:.0f} mg/L — Li is inert to all precipitation stages; passes through and reports to Na₂SO₄ product")
     if not drivers:
         drivers.append("Feed is essentially clean — minimal treatment required")
     return drivers
