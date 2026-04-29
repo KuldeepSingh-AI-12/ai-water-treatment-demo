@@ -1,72 +1,39 @@
-# Cr(VI) Treatment Selection Demo
+# Heavy Metal Precipitation Demo (Black Mass Refinery – Hypothetical Case)
 
-This is a simple Streamlit-based tool for preliminary screening of hexavalent chromium (Cr(VI)) removal from industrial water streams.
+This is a simple Streamlit-based tool for **screening heavy metal removal** from a hypothetical black mass refinery wastewater stream.
+
+The focus is on **hydroxide precipitation using pH adjustment** and basic process logic.
+
+---
 
 ## What the tool does
 
-The application takes basic water quality and process inputs:
+The application takes basic inputs such as:
 
 - Flowrate
-- Inlet Cr(VI) concentration
-- Target outlet concentration
-- pH
-- Sulfate concentration
-- COD (organic load)
-- Resin bed volume and depth
+- Initial pH and target precipitation pH
+- Alkali type (NaOH or lime)
+- Metal concentrations:
+  - Ni, Co, Mn (target metals)
+  - Fe, Al (co-precipitation support)
+  - Ca, Mg (hardness / scaling risk)
+- Sulfate concentration (sodium sulfate matrix)
 
 Based on these inputs, it:
 
 - Suggests a treatment route
 - Explains the reasoning behind the selection
-- Performs basic hydraulic checks (BV/h, EBCT)
-- Provides a simplified ion exchange capacity estimate
-- Highlights potential risks (fouling, competing ions, pH limits)
+- Estimates which metals will precipitate at the selected pH
+- Provides a simplified metal removal estimate
+- Highlights risks such as:
+  - Scaling (Ca/Mg)
+  - Sludge generation
+  - Incomplete Mn removal
+- Suggests a process train
+- Recommends polishing (e.g., ion exchange) if needed
 
-## Treatment options considered
+---
 
-The tool uses rule-based logic to recommend among:
+## Typical treatment concept
 
-- Chemical reduction + Cr(III) precipitation
-- Ion exchange (strong-base anion resin)
-- Adsorption / polishing
-- Combined treatment approaches
-
-## Engineering logic
-
-The decision is based on:
-
-- Cr(VI) concentration level
-- Required removal efficiency
-- Organic load (COD → fouling risk)
-- Competing ions (e.g., sulfate)
-- pH conditions
-
-This mimics an early-stage process selection approach used in concept development.
-
-## Important note
-
-This is a **screening-level tool only**.
-
-Final process design requires:
-- Full water chemistry analysis
-- Pilot or laboratory testing
-- Resin supplier validation
-- Safety and environmental assessment
-
-## Live demo
-
-You can access the app here:
-
-👉 https://ai-water-treatment-demo-fmx6c4qvrcamqu35kxdxoh.streamlit.app/
-
-## Technologies used
-
-- Python
-- Streamlit
-- Pandas
-
-## Why this project
-
-This project demonstrates how rule-based logic can support early-stage decision-making in industrial water treatment and process engineering.
-
-It is intended as a simple example of digital tools applied to real engineering problems.
+The tool reflects a simplified process approach:
